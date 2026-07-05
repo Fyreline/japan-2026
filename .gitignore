@@ -1,0 +1,15 @@
+# ─── Private source material — never publish these ───
+# Your coworker's original contains THEIR Supabase keys:
+OfflineExample.html
+# The Google-Sheet export has finances, flights and the 22nd surprise:
+Japan Itinerary/
+
+# macOS junk
+.DS_Store
+**/.DS_Store
+
+# Editor / tooling
+.claude/
+
+# Temp / scratch
+reference_*.json
