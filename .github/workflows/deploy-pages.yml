@@ -1,0 +1,63 @@
+# Deploys apps/web to GitHub Pages on every push to main (DEPLOYMENT.md §2,
+# ARCHITECTURE.md §11). One-time repo setup done by the household:
+#   1. Settings -> Pages -> Source: GitHub Actions (flipped in Phase 5's
+#      cutover — until then the live site keeps deploying from branch, so
+#      merging this file does NOT replace the current site).
+#   2. Settings -> Secrets and variables -> Actions -> Variables:
+#      VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (repo *variables*, not
+#      secrets — the anon key is public by design, RLS-guarded).
+name: deploy-pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/web/**', '.github/workflows/deploy-pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+        working-directory: apps/web
+      - run: npm run typecheck
+        working-directory: apps/web
+      - run: npm run build
+        working-directory: apps/web
+        env:
+          VITE_BASE: /japan-2026/
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+      # SPA fallback: no client-side routing today (tab state on one page),
+      # but a 404.html copy is cheap insurance if that ever changes.
+      - run: cp dist/index.html dist/404.html
+        working-directory: apps/web
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

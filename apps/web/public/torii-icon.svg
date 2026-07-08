@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Favicon: flat two-post torii. Favicons can't read CSS vars, so the
+       accent (clay) and paper hexes are hardcoded HERE ONLY — the single
+       documented hex exception (DESIGN.md §8). clay #c33c54, paper #f7fbfa. -->
+  <rect width="32" height="32" rx="6" fill="#f7fbfa" />
+  <g fill="#c33c54">
+    <rect x="4.5" y="4.5" width="23" height="2.4" rx="1.2" />
+    <rect x="2.8" y="7.4" width="26.4" height="3" rx="1.5" />
+    <rect x="6.5" y="12.6" width="19" height="2.6" rx="1" />
+    <rect x="8.6" y="7.4" width="3.1" height="19" rx="0.6" />
+    <rect x="20.3" y="7.4" width="3.1" height="19" rx="0.6" />
+  </g>
+</svg>
