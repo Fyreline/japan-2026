@@ -1,8 +1,9 @@
 # Deploys apps/web to GitHub Pages on every push to main (DEPLOYMENT.md §2,
-# ARCHITECTURE.md §11). One-time repo setup done by the household:
-#   1. Settings -> Pages -> Source: GitHub Actions (flipped in Phase 5's
-#      cutover — until then the live site keeps deploying from branch, so
-#      merging this file does NOT replace the current site).
+# ARCHITECTURE.md §11). One-time repo setup, done deliberately by the
+# household once the app is independently verified (NOT part of this commit):
+#   1. Settings -> Pages -> Source: GitHub Actions (the legacy root
+#      index.html that used to deploy-from-branch is gone; this workflow's
+#      first successful run is what makes the site live again).
 #   2. Settings -> Secrets and variables -> Actions -> Variables:
 #      VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (repo *variables*, not
 #      secrets — the anon key is public by design, RLS-guarded).

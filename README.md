@@ -1,66 +1,102 @@
 # Japan 2026 🇯🇵
 
-Our trip-planning dashboard, recreated from the coworker's Japan site but with our own
-itinerary, ideas and stops. 20 Sep – 3 Oct 2026: Tokyo → Fuji → Hiroshima → Osaka → Kyoto → home.
+Our trip-planning dashboard: map, day-by-day itinerary, ideas, restaurants, attractions,
+animal cafés and a submit-a-spot form. 20 Sep – 3 Oct 2026: Tokyo → Fuji → Hiroshima →
+Osaka → Kyoto → home.
 
-## What's here
-
-| File | What it is |
-|------|------------|
-| `index.html` | The whole site — map, itinerary, ideas, restaurants, attractions, animal cafes, submit form. Just open it. |
-| `config.js` | The **only** file to edit to switch on shared syncing (see below). |
-| `restaurants.json` / `attractions_by_location.json` / `animal_cafes.json` | The place data shown on the Restaurants / Attractions / Animal Cafes tabs. Edit these to add or change places. |
-| `SUPABASE_SETUP.md` | 5-minute guide to turn on shared syncing between our phones. |
-| `OfflineExample.html` | The coworker's original, kept for reference. |
-| `Japan Itinerary/` | Our Google Sheet export (source for the itinerary). |
+A React + Vite + TypeScript + Tailwind SPA, wearing the same "Aizome" indigo-and-crimson
+look as our other two household apps. It talks straight to Supabase (no server of ours) —
+so it's just a static site with a login gate and a couple of live-syncing tables.
 
 ## Tabs
 
-- **Itinerary** — day-by-day plan with hotels, travel and trip essentials (cash, Suica, eSim, car).
-- **Map view** — every hotel, event, idea, restaurant, attraction and cafe as a pin. Toggle layers top-right.
-- **Ideas** — all the spots from our planning notes, filterable by leg (Tokyo / Fuji / Hiroshima / Osaka / Kyoto).
-- **Restaurants / Attractions / Animal Cafes** — curated place lists with search + filters.
+- **Itinerary** — day-by-day plan: trip essentials (cash, Suica, eSim, car), day pills,
+  and an editable list of time slots per day. Type, drag to reorder, add or remove a
+  slot and it syncs to the other phone within a second when you're both signed in.
+- **Map** — every hotel, event, idea, restaurant, attraction and animal café as a pin,
+  toggleable by layer.
+- **Ideas** — the planning-notes spots, filterable by leg (Tokyo / Fuji / Hiroshima /
+  Osaka / Kyoto).
+- **Restaurants / Attractions / Animal cafés** — curated place lists with search + filters.
 - **Full data** — everything in one searchable place, grouped by city.
 - **Submit** — add a new spot from your phone; it appears on the map and tabs instantly.
 
-## Running it
+## Running it locally
 
-It's a plain static site — no build step.
+```bash
+cd apps/web
+npm install
+npm run dev
+```
 
-- **Quickest:** double-click `index.html`. (The Submit form still works and saves locally; the
-  Restaurants/Attractions/Animal-Cafes tabs need it served over http — see next.)
-- **Served locally (recommended):** from this folder run `python3 -m http.server 8123`
-  then open <http://localhost:8123/index.html>.
+Opens on <http://localhost:5175>. No `.env.local` needed to get started — the site runs
+in **open mode**: no login, and anything you add or edit saves only to that browser (a
+small "Sign-in off" pill shows in the header). This is the permanent, zero-setup fallback,
+not just a placeholder.
 
-## Login + shared syncing (Supabase)
+To turn on real sign-in and cross-device sync, follow **`SUPABASE_SETUP.md`** (free,
+~10 minutes) and add the two values it gives you to `apps/web/.env.local` (copy
+`apps/web/.env.example` as a starting point — that file is gitignored, so your keys never
+get committed).
 
-Out of the box the site runs in **open mode**: no login, and spots you add save only on the
-device that added them (you'll see a small "Sign-in off" note in the header).
+```bash
+npm run typecheck   # must stay clean
+npm run build        # must stay clean
+```
 
-Follow **`SUPABASE_SETUP.md`** (free, ~10 min) to switch on:
-- a **real sign-in** so only the two of you can open the site, and
-- **shared spots** that sync live across both phones.
+## Repo layout
 
-You paste two values into `config.js` and the login screen turns on automatically.
+```
+apps/web/              # the app — everything above lives here
+  src/
+    components/         # shell, tabs, cards, the itinerary/ subfolder
+    data/                # datasets: accommodations, ideas, trip essentials,
+                         #   itinerary days + seed, and the three curated JSON files
+    hooks/               # useSubmittedSpots, useItinerary, useTheme
+    auth/                # the Supabase sign-in gate
+    lib/                 # Supabase client
+supabase/migrations/    # the SQL behind both Supabase tables, for the record
+docs/                   # the build spec — architecture, data model, API, design, deployment
+```
+
+## Editing the place data
+
+`apps/web/src/data/restaurants.json`, `attractions_by_location.json` and
+`animal_cafes.json` are the curated lists behind those three tabs. Edit one of those files,
+commit, push to `main` — GitHub Actions rebuilds and redeploys automatically, no other
+steps.
+
+The Ideas list and the accommodations/events layer are TypeScript files in the same folder
+(`ideas.ts`, `accommodations.ts`) rather than JSON, since they're small and rarely change —
+same edit → push → deploy flow.
+
+The itinerary's starting content lives in `itineraryDays.ts` (the 14 days' dates/city/hotel)
+and `itinerarySeed.ts` (the starting time slots). Once the table has been seeded in
+Supabase, edits made live in the app take over — the seed only applies once, to an empty
+table.
 
 ## What's kept private (don't publish these)
 
 `.gitignore` already excludes them, but for the record — these are **not** committed:
-- `OfflineExample.html` — contains the coworker's Supabase keys.
-- `Japan Itinerary/` — finances, flight details, and the 22nd surprise.
-- `.DS_Store`, `.claude/`.
+- `OfflineExample.html` — a third party's reference site containing their own Supabase keys.
+- `Japan Itinerary/` — a spreadsheet export with finances, flight logistics, and the 22nd.
+- `apps/web/.env.local` — your local Supabase credentials.
+- `node_modules/`, `apps/web/dist/`, `.DS_Store`, `.claude/`.
 
-The app files (`index.html`, `config.js`, the JSONs) contain no secrets. The anon key you'll
-add to `config.js` is safe to publish (it's protected by row-level security).
+Everything else in the repo — including the itinerary seed text and the curated
+datasets — contains no secrets and no real names. The one genuinely private fact (what's
+happening on the evening of the 22nd) is never written into any file, in this repo or
+anywhere else — it only ever exists as something the two of you type directly into the
+gated, signed-in app.
 
 ## Putting it online (GitHub Pages)
 
-1. Do the `SUPABASE_SETUP.md` steps first so the live site is gated by login.
-2. `git init` in this folder, commit (the `.gitignore` keeps the private stuff out), and push
-   to a new GitHub repo.
-3. Repo **Settings → Pages → Deploy from branch → `main` / root**.
-4. Your site goes live at `https://<your-username>.github.io/<repo>/`.
+The live site deploys automatically via `.github/workflows/deploy-pages.yml` on every push
+to `main`, once repo **Settings → Pages → Source** is set to **GitHub Actions** and the two
+`VITE_SUPABASE_*` repo variables are set (see `SUPABASE_SETUP.md` step 7). It publishes to
+`https://fyreline.github.io/japan-2026/`.
 
-> Heads-up: on a **public** repo the itinerary/ideas are readable in the source even though the
-> live site asks for a login. For those to be private too, make the GitHub repo **private**
-> (GitHub Pages on a private repo needs a paid plan; otherwise host it privately like MishkaHub).
+> Heads-up: on a **public** repo the curated datasets and itinerary seed are readable in
+> the built source even though the live site asks for a login — only the two Supabase
+> tables are actually gated. If you want the itinerary content itself private too, make
+> the GitHub repo **private** (GitHub Pages on a private repo needs a paid plan).

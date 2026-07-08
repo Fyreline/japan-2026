@@ -90,3 +90,35 @@ export interface SubmissionPayload {
   approxWait: string
   bookingRequirement: string
 }
+
+// ── Itinerary — day metadata (DATA_MODEL.md §6a, static, not collaborative) ──
+export interface ItineraryDay {
+  day: number // 1–14
+  date: string // 'Sun 20 Sep' … 'Sat 3 Oct'
+  city: string // display: 'Tokyo', 'Mt. Fuji / Hakone', 'Homeward bound'
+  leg: Leg
+  hotel: string // '' when unknown
+  hotelBooked: boolean
+}
+
+// ── Itinerary — slot client shape (DATA_MODEL.md §6b, collaborative state) ───
+export type SlotType = 'travel' | 'food' | 'culture' | 'free' | 'sleep' | 'surprise' | 'default'
+
+export const SLOT_TYPES: SlotType[] = [
+  'travel',
+  'food',
+  'culture',
+  'free',
+  'sleep',
+  'surprise',
+  'default',
+]
+
+export interface ItinerarySlot {
+  slotKey: string // stable id 'dNN-HHMM-slug', unique for all time
+  day: number // 1–14, joins to ItineraryDay
+  position: number // fractional sort key within the day (§6c)
+  time: string // display label, free text (usually 'HH:MM')
+  type: SlotType // drives the coloured left edge (DESIGN.md §6)
+  text: string // the editable content
+}

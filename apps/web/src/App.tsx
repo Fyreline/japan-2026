@@ -10,7 +10,7 @@ import { TabNav } from './components/TabNav'
 import { MobileNav } from './components/MobileNav'
 import { SeigaihaBand } from './components/Seigaiha'
 import { LoginScreen } from './components/LoginScreen'
-import { ItineraryPlaceholder } from './components/ItineraryPlaceholder'
+import { ItineraryPage } from './components/itinerary/ItineraryPage'
 import { MapView } from './components/MapView'
 import { IdeasList } from './components/IdeasList'
 import { RestaurantsList } from './components/RestaurantsList'
@@ -68,7 +68,7 @@ export default function App() {
           />
         </div>
 
-        {activeTab === 'itinerary' && <ItineraryPlaceholder />}
+        {activeTab === 'itinerary' && <ItineraryPage auth={auth.state} />}
         {activeTab === 'ideas' && <IdeasList onSeeOnMap={seeOnMap} />}
 
         {isPlaces && (
