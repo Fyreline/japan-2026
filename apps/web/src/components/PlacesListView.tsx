@@ -6,7 +6,9 @@ import {
   entryCardPills,
   entryFocus,
 } from '../data/entryView'
+import { itemKeyForEntry } from '../data/itemKey'
 import type { MapFocus } from '../mapFocus'
+import type { UseVisited } from '../hooks/useVisited'
 import { FilterPills, type PillOption } from './FilterPills'
 import { SearchInput } from './SearchInput'
 import { PlaceCard } from './PlaceCard'
@@ -38,11 +40,13 @@ export function PlacesListView({
   itemNoun,
   searchPlaceholder,
   onSeeOnMap,
+  visited,
 }: {
   entries: PlaceEntry[]
   itemNoun: string
   searchPlaceholder: string
   onSeeOnMap(f: MapFocus): void
+  visited: UseVisited
 }) {
   const [city, setCity] = useState('All')
   const [category, setCategory] = useState('All')
@@ -138,20 +142,25 @@ export function PlacesListView({
             </span>
           </div>
           <div className="grid gap-3">
-            {items.map((entry) => (
-              <PlaceCard
-                key={entry.id}
-                title={entry.title}
-                pills={entryCardPills(entry)}
-                description={entry.description}
-                fields={entryCardFields(entry)}
-                links={entryCardLinks(entry)}
-                badge={entry.source === 'User Submission' ? 'User Submission' : undefined}
-                onSeeOnMap={
-                  entry.coordinates ? () => onSeeOnMap(entryFocus(entry)!) : undefined
-                }
-              />
-            ))}
+            {items.map((entry) => {
+              const key = itemKeyForEntry(entry)
+              return (
+                <PlaceCard
+                  key={entry.id}
+                  title={entry.title}
+                  pills={entryCardPills(entry)}
+                  description={entry.description}
+                  fields={entryCardFields(entry)}
+                  links={entryCardLinks(entry)}
+                  badge={entry.source === 'User Submission' ? 'User Submission' : undefined}
+                  visited={visited.isVisited(key)}
+                  onToggleVisited={() => visited.toggle(key)}
+                  onSeeOnMap={
+                    entry.coordinates ? () => onSeeOnMap(entryFocus(entry)!) : undefined
+                  }
+                />
+              )
+            })}
           </div>
         </section>
       ))}

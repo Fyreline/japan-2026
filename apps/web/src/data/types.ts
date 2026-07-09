@@ -122,3 +122,44 @@ export interface ItinerarySlot {
   type: SlotType // drives the coloured left edge (DESIGN.md §6)
   text: string // the editable content
 }
+
+// ── Packing checklist (DATA_MODEL.md §11a, extension) ────────────────────────
+export type PackingCategory = 'documents' | 'electronics' | 'clothing' | 'health' | 'other'
+
+export const PACKING_CATEGORIES: { id: PackingCategory; label: string }[] = [
+  { id: 'documents', label: 'Documents' },
+  { id: 'electronics', label: 'Electronics' },
+  { id: 'clothing', label: 'Clothing' },
+  { id: 'health', label: 'Health & first aid' },
+  { id: 'other', label: 'Everything else' },
+]
+
+export interface PackingItem {
+  itemKey: string // 'pk-…' stable sync handle (mirrors slot_key)
+  category: PackingCategory
+  label: string // the editable text
+  checked: boolean
+  position: number // fractional sort key within the category (§6c rules)
+}
+
+// ── Journal entries (DATA_MODEL.md §12a, extension) ──────────────────────────
+export interface JournalEntry {
+  entryKey: string // 'jr-{epochms}-{rand4}' — stable sync handle
+  date: string // ISO 'YYYY-MM-DD' — the day the entry describes
+  text: string
+  photoPath: string | null // Storage object path in journal-photos
+}
+
+// ── Weather (DATA_MODEL.md §13b, extension — client-only, no table) ──────────
+export interface WeatherSnapshot {
+  city: City
+  fetchedAt: number // Date.now() at fetch
+  current: { temp: number; code: number } // temperature_2m °C, weather_code
+  daily: {
+    date: string // 'YYYY-MM-DD'
+    code: number
+    tMax: number
+    tMin: number
+    rainChance: number // precipitation_probability_max, %
+  }[]
+}

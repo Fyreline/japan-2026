@@ -2,7 +2,7 @@
 
 This document is the durable reference for how the rebuilt Japan 2026 trip site fits together: the stack, the repo layout, component responsibilities, the Supabase auth gate, how itinerary edits travel between the two travellers' phones, failure modes, and how the whole thing deploys. Every other doc in this suite assumes the decisions recorded here. For the delivery order see [PLAN.md](PLAN.md); for storage shapes see [DATA_MODEL.md](DATA_MODEL.md); for the Supabase surface see [API.md](API.md); for the visual contract see [DESIGN.md](DESIGN.md); for ops see [DEPLOYMENT.md](DEPLOYMENT.md).
 
-**Status: planned.** The current site is a single ~140 KB `index.html` (inline styles + scripts, pink sakura theme, CDN scripts, static itinerary cards). This suite specifies its replacement: a **React + Vite + TypeScript + Tailwind v4** SPA in the exact stack of the two sibling household apps (MishkaHub, Michi), wearing the shared Aizome palette, with a fully editable, live-syncing itinerary.
+**Status:** §1–§12 describe the **shipped rebuild**, live at `https://fyreline.github.io/japan-2026/` — a **React + Vite + TypeScript + Tailwind v4** SPA in the exact stack of the two sibling household apps (MishkaHub, Michi), wearing the shared Aizome palette, with a fully editable, live-syncing itinerary. §13–§19 specify the **feature extension** (PWA/offline, Today view, visited marks, packing, weather, quick reference, journal — [PLAN.md](PLAN.md) Phases 7–13): strictly additive, nothing shipped changes behaviour.
 
 ---
 
@@ -12,10 +12,11 @@ A private, two-user trip dashboard for a 14-day Japan holiday (20 Sep – 3 Oct 
 
 | Component | Technology | Runs on | Role |
 |---|---|---|---|
-| Web app | React ^19.2.7 + Vite ^8.1.3 + TypeScript ^6.0.3 + Tailwind v4 (^4.3.2 + `@tailwindcss/vite`), static build | GitHub Pages | All UI: itinerary, map, ideas, place lists, submit form |
-| Database + auth + realtime | Supabase (Postgres, GoTrue Auth, Realtime) — free tier, **already provisioned and in use** | Supabase cloud (EU/London) | Sign-in gate, `submitted_spots`, `itinerary_slots`, live cross-device sync |
+| Web app | React ^19.2.7 + Vite ^8.1.3 + TypeScript ^6.0.3 + Tailwind v4 (^4.3.2 + `@tailwindcss/vite`), static build | GitHub Pages | All UI: itinerary, map, ideas, place lists, submit form, packing, journal, reference |
+| Database + auth + realtime + storage | Supabase (Postgres, GoTrue Auth, Realtime, Storage) — free tier, **already provisioned and in use** | Supabase cloud (EU/London) | Sign-in gate, five tables, journal photo bucket, live cross-device sync |
 | Map | `leaflet` (npm) + CARTO light tiles | bundled / basemaps.cartocdn.com | Map tab with 5 toggleable pin layers |
 | Drag-and-drop | `@dnd-kit/core` + `@dnd-kit/sortable` | bundled | Itinerary time-slot reordering (touch + keyboard) |
+| Installability / offline | `vite-plugin-pwa` (Workbox) service worker + web manifest | generated into the Pages build (§14) | Home-screen install, app-shell precache, read-cache for Supabase GETs, update prompt |
 
 **There is no server of ours anywhere.** The browser talks straight to Supabase with the publishable anon key plus a signed-in session; row-level security is the entire authorisation model. This makes Japan the simplest of the three household apps: same frontend stack as MishkaHub/Michi, but **no FastAPI process, no Cloudflare Tunnel, no LaunchAgent** — nothing runs on the household Mac.
 
@@ -23,8 +24,9 @@ Runtime network dependencies:
 
 | Dependency | Loaded from | Used for | If unreachable |
 |---|---|---|---|
-| Supabase project | `*.supabase.co` | Auth, both tables, realtime | Open mode / localStorage cache (§5, §7, §8) |
-| CARTO tile server | basemaps.cartocdn.com | Map tiles | Grey map, pins still plot |
+| Supabase project | `*.supabase.co` | Auth, all five tables, realtime, journal photos (Storage) | Open mode / localStorage cache (§5, §7, §8) + service-worker read cache (§14) |
+| CARTO tile server | basemaps.cartocdn.com | Map tiles | Grey map, pins still plot (last-viewed tiles may serve from the SW cache, §14) |
+| Open-Meteo | api.open-meteo.com | Weather card on the itinerary (§18) — **keyless, no auth, the app's only third-party API call** | Cached snapshot (<6 h) or the card hides; nothing else affected |
 
 Everything else — fonts (`@fontsource-variable/*`), Leaflet's JS/CSS, dnd-kit, the three curated JSON datasets — is bundled at build time. The current site's four CDN `<script>`/`<link>` tags (unpkg Leaflet, jsdelivr supabase-js + SortableJS, Google Fonts) all disappear.
 
@@ -113,6 +115,10 @@ Locked to the household versions (verified against both sibling `package.json`s)
 - **Why dnd-kit over native HTML5 drag-and-drop:** this app is used on two phones in Japan; HTML5 DnD has no touch support without a shim, while dnd-kit gives pointer + touch + keyboard sorting, an accessible announcer, and a small tree-shaken footprint. SortableJS (the prototype's choice) is imperative-DOM and fights React's ownership of the list.
 - **Why plain `leaflet` over react-leaflet:** the existing marker/layer/popup logic is imperative and ports 1:1 into one `MapView` component (`useRef` + `useEffect`); react-leaflet would add a wrapper library for a single component's benefit.
 - `motion` is **not** included at v1 — dnd-kit provides the drag affordances, and nothing else here earns springs. Adding it later requires written justification in the commit message (same rule as Michi).
+- **Extension additions (dev-only; zero new runtime deps):**
+  - **`vite-plugin-pwa` (dev):** the PWA feature itself (§14). **Why over a hand-rolled service worker:** the dangerous part of a SW is the update lifecycle — a hand-rolled precache list drifts from the build output and serves a stale shell forever, the classic PWA foot-gun. `vite-plugin-pwa` generates the Workbox precache manifest *from* the Vite build (revision-hashed per file), owns registration + the update prompt, and is the de-facto standard for this stack. Neither sibling app has PWA support yet — this config is written to be the **household pattern** Mishka/Michi can copy later (§14).
+  - **`sharp` (dev):** used by one committed script (`scripts/generate-pwa-icons.mjs`, §14e) to rasterise the torii SVG into the PNG icon set, run manually when the mark changes. Never imported by app code, never shipped.
+  - **Deliberately avoided:** an image-compression library for journal photos. `createImageBitmap` + canvas + `toBlob` is ~30 lines (`lib/images.ts`, DATA_MODEL.md §12d) and does exactly the one resize this app needs; `browser-image-compression` would add a worker bundle for no additional capability here. Same reasoning pattern as leaflet-over-react-leaflet above.
 - Vite config (identical pattern to the siblings, Japan takes port **5175** — Mishka owns 5173, Michi 5174):
 
 ```ts
@@ -133,6 +139,8 @@ Explicit decisions, not omissions. Revisiting any of them needs a written reason
 4. **No new user accounts or roles.** Two fixed Supabase Auth users, signups disabled in the dashboard. No profiles table, no per-user row attribution.
 5. **No offline-first sync engine.** localStorage is a fallback and a read cache, not a CRDT. With two cooperating users, last-write-wins is the conflict policy (§7).
 6. **No feature loss.** Everything the current site does — map + 5 layers, 44 ideas, three JSON-driven tabs, Full data tab, submit form + `submitted_spots` sync, the auth gate with open-mode fallback, the 14-day itinerary including the discreet 22 Sep evening entry — survives the rebuild. The removals are visual (pink sakura theme) and structural (inline everything, CDN scripts, static itinerary cards).
+
+The feature extension (§13–§19) **does not revisit any of these** — recorded here because this file is where revisiting would have to be argued. Specifically: the PWA adds a service worker that caches the app shell and *read* responses, not a mutation queue or CRDT — offline writes keep the shipped localStorage-plus-quiet-note model, so non-goal 5 stands. The three new tabs switch on the same `activeTab` state — non-goal 2 stands. The three new tables and the photo bucket carry **no per-user attribution** — non-goal 4 stands. And every shipped surface keeps its exact behaviour — non-goal 6 now covers the extension too.
 
 ## 5. Auth model — the Supabase sign-in gate
 
@@ -235,6 +243,10 @@ Decisions:
 | CARTO tiles blocked | tile errors | Grey map, pins/popups still work; list tabs unaffected |
 | A curated JSON fails to parse at build | `tsc`/Vite build error | Caught in CI before deploy — malformed data can no longer reach production silently (an upgrade over the current runtime fetch) |
 | Realtime frame for a slot mid-local-edit | slot_key match on a focused row | Local uncommitted text wins until blur (the update then overwrites the remote value — last write wins, §7) |
+| Fully offline relaunch (installed PWA, no signal) | SW serves the precached shell | App opens; itinerary/packing/visited/journal text render from localStorage snapshots; last-fetched Supabase GETs and map tiles serve from the SW runtime caches; offline banner shows (§14) |
+| New deploy while the app is open | `needRefresh` from vite-plugin-pwa | Quiet "New version ready — Refresh" toast; nothing auto-reloads mid-edit (§14d) |
+| Journal photo upload fails | storage error on `upload()` | The entry's text row still saves independently; the photo slot shows a quiet retry control — no queued upload (§19) |
+| Open-Meteo unreachable / beyond horizon | fetch rejects / date out of range | Weather card shows the cached snapshot (<6 h, with "as of" time) or hides entirely — never an error state (§18) |
 
 ## 9. Dark mode strategy
 
@@ -267,3 +279,222 @@ Same mechanism as the siblings, verbatim:
 - Design system (Aizome application, slot colours, motif, mobile nav, contrast): [DESIGN.md](DESIGN.md)
 - Phases and task ownership ([Opus]/[Sonnet]): [PLAN.md](PLAN.md)
 - Ops runbook (Pages, env variables, Supabase changes, rollback): [DEPLOYMENT.md](DEPLOYMENT.md)
+
+---
+
+# The feature extension (§13–§19)
+
+Seven additions to the shipped app: installable PWA/offline, Today view, visited marks, packing checklist, weather card, quick reference, trip journal. All additive — the flows in §5–§7 are untouched, and every new synced feature deliberately reuses their patterns (stable client keys, optimistic writes, localStorage snapshots, realtime channels, last-write-wins).
+
+## 13. Extension overview — new surfaces, files and navigation
+
+### 13a. New files (extends the §2 tree; nothing existing moves)
+
+```
+apps/web/
+├── vite.config.ts                     # gains VitePWA() — §14a
+├── index.html                         # gains iOS PWA meta + apple-touch-icon link — §14c
+├── public/
+│   ├── pwa-192.png  pwa-512.png       # §14e icon set, generated once, committed
+│   ├── pwa-maskable-512.png
+│   └── apple-touch-icon.png           # 180×180
+├── scripts/
+│   └── generate-pwa-icons.mjs         # sharp; torii SVG → the PNG set (§14e)
+└── src/
+    ├── tabs.ts                        # + 'packing' | 'journal' | 'reference'; PLAN_TABS group
+    ├── hooks/
+    │   ├── useVisited.ts              # §16 — mirrors useItinerary, simpler
+    │   ├── usePacking.ts              # §17
+    │   ├── useJournal.ts              # §19
+    │   ├── useWeather.ts              # §18 — fetch + cache, no Supabase
+    │   └── useOnline.ts               # navigator.onLine + events → offline banner
+    ├── lib/
+    │   ├── images.ts                  # journal photo compression (DATA_MODEL §12d)
+    │   └── weather.ts                 # the Open-Meteo fetch (API §8)
+    ├── data/
+    │   ├── itemKey.ts                 # visited-mark canonical keys (DATA_MODEL §10a)
+    │   ├── packingSeed.ts             # DATA_MODEL §11d
+    │   ├── quickReference.ts          # DATA_MODEL §15
+    │   └── tripWindow.ts              # DATA_MODEL §14
+    └── components/
+        ├── OfflineBanner.tsx          # §14d
+        ├── UpdateToast.tsx            # §14d
+        ├── VisitedToggle.tsx          # §16 — rendered inside PlaceCard
+        ├── weather/WeatherCard.tsx    # §18
+        ├── packing/                   # PackingPage, CategoryGroup, PackingRow, AddItemRow
+        ├── journal/                   # JournalPage, EntryComposer, EntryCard
+        └── reference/ReferencePage.tsx
+supabase/migrations/
+├── 0002_visited_marks.sql             # API §5
+├── 0003_packing_items.sql             # API §6
+└── 0004_journal.sql                   # API §7 — table + bucket + storage policies
+```
+
+### 13b. Navigation growth — 8 views become 11
+
+- **Desktop tab row:** `Itinerary · Map · Ideas · Restaurants · Attractions · Animal cafés · Full data · Packing · Journal · Reference · Submit`. The row already scrolls horizontally when cramped (DESIGN.md §4) — no structural change.
+- **Mobile bottom nav: the five items do not change.** The three new views join a **"Plan" group** on the existing Places-group mechanic: tapping Plan opens the last-used of Itinerary / Packing / Journal / Reference, and those four views show a segmented control on mobile — `App.tsx` grows a `lastPlanTab` alongside the shipped `lastPlacesTab`, and `tabs.ts` a `PLAN_TABS` list beside `PLACES_TABS`. This is the zero-disruption option: every shipped nav item keeps its slot and meaning, and the grouping mechanic is one the household already uses daily.
+- **Quick reference** is the one new view with no architecture: a static module (`data/quickReference.ts`, content canonical in DATA_MODEL.md §15) rendered by one component. No storage, no network, works offline by construction once the shell is precached.
+
+## 14. PWA & offline architecture
+
+The goal is a **genuine installed-app experience on iOS** — own home-screen icon, standalone window with no Safari chrome, opens with the last-known data on zero signal — without a native app (no Apple Developer Program, no signing). The mechanism is `vite-plugin-pwa` (Workbox under the hood; §3 justification). **Neither sibling app has PWA support yet — this section is written as the household pattern**, and everything below (config shape, icon script, update toast) ports to Mishka/Michi by changing names and colours only.
+
+### 14a. Plugin config (`vite.config.ts`)
+
+```ts
+VitePWA({
+  registerType: 'prompt',                        // §14d — deliberate, not autoUpdate
+  includeAssets: ['torii-icon.svg', 'apple-touch-icon.png'],
+  manifest: { /* §14b — note base-aware start_url/scope */ },
+  workbox: {
+    globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],   // shell + fonts + icons
+    navigateFallback: `${base}index.html`,                 // SPA route fallback
+    runtimeCaching: [ /* §14f */ ],
+  },
+  devOptions: { enabled: false },                // SW off in dev — dev stays simple
+})
+```
+
+`base` is the same `process.env.VITE_BASE ?? '/'` the config already uses — the manifest's `start_url`/`scope` and the fallback URL must be computed from it, because the app serves from `/japan-2026/` on Pages but `/` locally.
+
+### 14b. Manifest
+
+| Field | Value | Notes |
+|---|---|---|
+| `name` / `short_name` | `Japan 2026` | short enough for both fields |
+| `description` | `Two of you, two weeks, one plan.` | the login line, reused |
+| `display` | `standalone` | the whole point — no browser chrome |
+| `start_url` / `scope` | `VITE_BASE` (`/japan-2026/` in prod) | computed, never hardcoded |
+| `theme_color` | `#f7fbfa` | Aizome light `paper` |
+| `background_color` | `#f7fbfa` | splash background |
+| `icons` | `pwa-192.png` (192, `any`), `pwa-512.png` (512, `any`), `pwa-maskable-512.png` (512, `maskable`) | §14e |
+
+The two manifest hexes are **the second documented hex exception** (the favicon SVG being the first — DESIGN.md §8): manifests can't read CSS variables, the values are copied from `theme.css` light `paper`, and a theme-value change means updating them by hand. A manifest has no dark variant; committing to the light paper value is the calm choice (matches the iOS status-bar treatment below).
+
+### 14c. iOS specifics (`index.html` `<head>`)
+
+```html
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Japan 2026" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+```
+
+Facts to hold, so nobody debugs a non-bug later: iOS has **no install prompt** — installation is Safari → Share → *Add to Home Screen*, always. With the manifest + these tags, what lands is the real thing: own icon (iOS reads `apple-touch-icon`, not manifest icons), standalone window, SW-served offline shell. iOS may evict SW caches after weeks of disuse — irrelevant for a daily-use trip app, noted for the household pattern. The `apple-touch-icon` must be opaque (no alpha): full-bleed paper background, no rounded corners (iOS applies its own mask).
+
+### 14d. Update flow + offline indicator
+
+- **`registerType: 'prompt'`, deliberately.** Rationale recorded: this app is edited live mid-trip; `autoUpdate` swaps the SW underneath a session and a mid-edit reload is exactly the wrong moment. Instead `useRegisterSW` (from `virtual:pwa-register/react`) drives an `UpdateToast`: when `needRefresh` fires, show the standard toast (DESIGN.md §12) — "A new version is ready · Refresh" — and call `updateServiceWorker(true)` only on tap. Dismissal leaves the old version running until next launch; deploys are never urgent here.
+- **`OfflineBanner`**: `useOnline.ts` subscribes to `online`/`offline` events (`navigator.onLine` initial). Offline → a slim strip under the header: "Offline — showing the last synced copy" (DESIGN.md §12). It complements, not replaces, the itinerary's per-surface sync whisper; mutations offline already degrade correctly via the shipped optimistic-write path (§8).
+
+### 14e. Icons — generated from the torii mark
+
+One committed script, `scripts/generate-pwa-icons.mjs` (`sharp`, dev-only), run manually once and re-run only if the mark changes; the four PNGs are committed to `public/`. What Opus produces:
+
+| File | Size | Construction (from `public/torii-icon.svg`'s geometry) |
+|---|---|---|
+| `pwa-192.png` | 192² | paper `#f7fbfa` rounded-rect ground (the SVG's own), clay torii at the SVG's proportions |
+| `pwa-512.png` | 512² | same, scaled |
+| `pwa-maskable-512.png` | 512² | **full-bleed square** paper ground, torii scaled to ~60% and centred — everything meaningful inside the central 80% safe zone (maskable spec) |
+| `apple-touch-icon.png` | 180² | full-bleed square paper ground (opaque, **no rounded corners** — iOS masks it), torii at ~70% |
+
+The two hexes involved are the same pair already excepted in the favicon (`clay #c33c54`, `paper #f7fbfa`) — the script reads them as constants with a comment pointing at the DESIGN.md §8 exception.
+
+### 14f. Service-worker caching strategy
+
+Precache: the whole build output (shell, JS/CSS, self-hosted fonts, icons) — revision-hashed by the plugin, so updates are exact. Runtime caching, in matching order:
+
+| Route (regex on URL) | Strategy | Cache | Why |
+|---|---|---|---|
+| `*.supabase.co/auth/v1/*` | **NetworkOnly** | — | Tokens are never cache material |
+| `*.supabase.co/rest/v1/*` (GET only — Workbox default) | **NetworkFirst**, `networkTimeoutSeconds: 4`, maxEntries 64, maxAge 7 d | `supabase-rest` | Freshness matters when online; availability wins when not. The last-loaded slots/spots/marks/packing/journal rows render on the Shinkansen. **Not** CacheFirst — a stale itinerary shown while online would fight the realtime channel |
+| `*.supabase.co/storage/v1/object/*` | **CacheFirst**, `matchOptions: { ignoreSearch: true }`, maxEntries 40, maxAge 30 d | `journal-photos` | Signed URLs differ only by token query — `ignoreSearch` makes the object path the cache key, so last-viewed photos work offline; the bytes at a path never change (overwrite = same path, rare, self-heals on expiry) |
+| `basemaps.cartocdn.com/*` | **CacheFirst**, maxEntries 200, maxAge 7 d | `carto-tiles` | Last-viewed map areas survive offline; 200 tiles ≈ a few MB |
+| `api.open-meteo.com` | **not listed → no SW involvement** | — | The app-level cache (DATA_MODEL.md §13c) already owns weather staleness; two cache layers would fight |
+
+What the SW deliberately does **not** do: queue mutations (no Workbox background-sync). Offline writes keep the shipped model — optimistic local state + localStorage + the quiet "saved on this device" note (§4 note, §8). Realtime is a WebSocket and is untouched by all of this.
+
+## 15. Today view — the itinerary's smart default
+
+Pure client logic, no storage, no new components — behaviour added to `ItineraryPage`:
+
+```
+ItineraryPage mounts (or the app opens onto the Itinerary tab)
+  │ tripDayFor(new Date())        — DATA_MODEL.md §14; device-local by design
+  ├── null (outside 20 Sep – 3 Oct 2026) ──► activeDay = 1, exactly as shipped
+  └── n (1–14) ──► activeDay = n ("today's pill" auto-selected)
+        │ find the current/next slot: parse slot.time via /^(\d{1,2}):(\d{2})/,
+        │ ignore unparseable labels; current = last slot ≤ now, else next = first
+        └─► one-shot scrollIntoView({ block: 'center' }) + the "now" marker
+            (DESIGN.md §13); respects prefers-reduced-motion (instant, no smooth)
+```
+
+Rules: the auto-selection runs **once per mount**, never re-yanks the day while the user browses other days, and manual pill taps always win. No ticking timer — the marker recomputes on mount and day-switch only (a phone glance remounts often enough). Timezone reasoning is recorded in DATA_MODEL.md §14: device-local time *is* JST exactly when the window check can pass.
+
+## 16. Data flow C — visited marks (extension)
+
+The lightest sync loop in the app, deliberately shaped like §6/§7:
+
+```
+VisitedToggle tap on a card
+  │ key = itemKeyForEntry(entry) | itemKeyForIdea(idea)   (DATA_MODEL.md §10a —
+  │       canonical, index-free; NEVER the raw normalized id)
+  ├──► optimistic: flip in the Set → card dims/undims instantly
+  ├──► localStorage 'japan2026VisitedMarks' snapshot
+  └──► signed-in: upsert {item_key} (ignoreDuplicates) | delete eq item_key
+                                                          (API.md §5b)
+other device ◄── realtime '*' on visited_marks
+                 INSERT → add key · DELETE → drop key (replica identity full)
+```
+
+`useVisited` is provided once in `App.tsx` (like `useSubmittedSpots`) and passed down — the same set backs Ideas, the three place tabs and Full data, so a tick on a Restaurants card is instantly visible on the same place in Full data. Accommodations/events cards get no toggle (DATA_MODEL.md §10a). Open mode: the Set lives in localStorage alone.
+
+## 17. Data flow D — packing checklist (extension)
+
+`usePacking` is `useItinerary` with the serial numbers filed off — same load → seed-if-empty → keyed-Map state → optimistic mutations → snapshot → realtime loop (API.md §6c), with category standing in for day and no drag machinery (DATA_MODEL.md §11e). Conflict policy, seeding race-proofing, offline behaviour: all identical to §7 by construction. The one wrinkle worth naming: `checked` toggles from two phones are last-write-wins like everything else — ticking the same passport twice in the same second converges trivially.
+
+## 18. Weather widget — the app's one third-party call
+
+**Unlike everything else in this app, this is a network call to a third party with no auth of any kind** — no Supabase, no key, no session (API.md §8 confirms Open-Meteo's free tier is genuinely keyless; there is nothing to provision). It is also the only feature allowed to fail into silence:
+
+```
+Itinerary renders day N
+  │ leg = ITINERARY_DAYS[N].leg  ── 'Home'? ──► no card
+  │ cache['japan2026WeatherCache'][leg city] fresh (<30 min)? ──► render it
+  └─ else fetchWeather(city)  (lib/weather.ts — plain fetch, JST-pinned days)
+       ├─ ok ──► snapshot → cache → render: selected day's real date within the
+       │        7-day horizon? that day's forecast · else current conditions only
+       └─ fail ──► cached <6 h? render with "as of HH:MM" · else render nothing
+```
+
+The card follows the **selected** day (which, during the trip, the Today view makes today by default). One compact card under the day header (DESIGN.md §16) — not a dashboard, and never a loading spinner or error state.
+
+## 19. Data flow E — journal + Storage (extension)
+
+The app's first Supabase Storage use. Two independent halves per entry — text row and photo object — so a photo failure never costs words:
+
+```
+EntryComposer save
+  │ entry = { entryKey:'jr-…', date (defaults today), text, photoPath:null }
+  ├──► optimistic: into state + localStorage 'japan2026JournalEntries'
+  ├──► INSERT journal_entries row                        (API.md §7e)
+  └──► photo chosen? compressImage(file)  — lib/images.ts, ≤1600 px JPEG q0.8,
+       │             REQUIRED before any upload (DATA_MODEL.md §12d)
+       ├─ upload to journal-photos at '{entryKey}.jpg' (upsert)
+       ├─ ok ──► UPDATE row photo_path
+       └─ fail ──► row + text stand; photo slot shows quiet retry (§8)
+
+display: photoPath → createSignedUrl(path, 3600), memoised per session;
+         <img> loads via the SW CacheFirst route (§14f) → last-viewed photos
+         work offline. URLs expire and are never persisted.
+
+other device ◄── realtime '*' on journal_entries — upsert/drop by entry_key;
+                 its next signed-URL fetch pulls the photo.
+
+delete: remove object first, then row; orphaned objects are harmless
+        (housekeeping recipe, API.md §7e). Open mode: text-only, no photo UI.
+```
+
+No attribution anywhere — no author column, no per-user path prefixes, nothing in metadata (§4.4). Entries are the couple's, jointly editable, last write wins.

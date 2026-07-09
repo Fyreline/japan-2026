@@ -20,6 +20,8 @@ import { SlotRow } from './SlotRow'
 export function SlotList({
   day,
   slots,
+  markedSlotKey,
+  markedStatus,
   onReorder,
   onUpdate,
   onBeginEdit,
@@ -28,6 +30,8 @@ export function SlotList({
 }: {
   day: number
   slots: ItinerarySlot[]
+  markedSlotKey?: string | null
+  markedStatus?: 'now' | 'next' | null
   onReorder(slotKey: string, toIndex: number): void
   onUpdate(slotKey: string, patch: Partial<Pick<ItinerarySlot, 'time' | 'type' | 'text'>>): void
   onBeginEdit(slotKey: string): void
@@ -63,6 +67,7 @@ export function SlotList({
             <SlotRow
               key={slot.slotKey}
               slot={slot}
+              marked={slot.slotKey === markedSlotKey ? markedStatus : null}
               onCommitText={(text) => onUpdate(slot.slotKey, { text })}
               onChangeType={(type: SlotType) => onUpdate(slot.slotKey, { type })}
               onChangeTime={(time) => onUpdate(slot.slotKey, { time })}

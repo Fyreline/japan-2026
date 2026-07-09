@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import { IDEAS, ideaMapLink } from '../data/ideas'
 import { getIdeaLeg } from '../data/tripEssentials'
+import { itemKeyForIdea } from '../data/itemKey'
 import { CITY_ORDER, type City, type TripIdea } from '../data/types'
 import type { MapFocus } from '../mapFocus'
+import type { UseVisited } from '../hooks/useVisited'
 import { FilterPills, type PillOption } from './FilterPills'
 import { SearchInput } from './SearchInput'
 import { PlaceCard } from './PlaceCard'
@@ -27,7 +29,13 @@ function searchText(idea: TripIdea): string {
     .toLowerCase()
 }
 
-export function IdeasList({ onSeeOnMap }: { onSeeOnMap(f: MapFocus): void }) {
+export function IdeasList({
+  onSeeOnMap,
+  visited,
+}: {
+  onSeeOnMap(f: MapFocus): void
+  visited: UseVisited
+}) {
   const [leg, setLeg] = useState('All')
   const [query, setQuery] = useState('')
 
@@ -77,26 +85,31 @@ export function IdeasList({ onSeeOnMap }: { onSeeOnMap(f: MapFocus): void }) {
             </span>
           </div>
           <div className="grid gap-3">
-            {group.items.map((idea) => (
-              <PlaceCard
-                key={idea.id}
-                title={idea.title}
-                pills={[idea.tag]}
-                cost={idea.cost}
-                description={idea.description}
-                source={idea.source}
-                links={[{ label: 'Map', href: ideaMapLink(idea) }]}
-                onSeeOnMap={() =>
-                  onSeeOnMap({
-                    layer: 'ideas',
-                    markerId: `ideas:${idea.id}`,
-                    lat: idea.lat,
-                    lng: idea.lng,
-                    nonce: Date.now(),
-                  })
-                }
-              />
-            ))}
+            {group.items.map((idea) => {
+              const key = itemKeyForIdea(idea)
+              return (
+                <PlaceCard
+                  key={idea.id}
+                  title={idea.title}
+                  pills={[idea.tag]}
+                  cost={idea.cost}
+                  description={idea.description}
+                  source={idea.source}
+                  links={[{ label: 'Map', href: ideaMapLink(idea) }]}
+                  visited={visited.isVisited(key)}
+                  onToggleVisited={() => visited.toggle(key)}
+                  onSeeOnMap={() =>
+                    onSeeOnMap({
+                      layer: 'ideas',
+                      markerId: `ideas:${idea.id}`,
+                      lat: idea.lat,
+                      lng: idea.lng,
+                      nonce: Date.now(),
+                    })
+                  }
+                />
+              )
+            })}
           </div>
         </section>
       ))}

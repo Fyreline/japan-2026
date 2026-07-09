@@ -2,7 +2,7 @@
 
 Purpose: the visual + interaction contract for the rebuilt trip site. Direction: **the household's Aizome (藍染) woodblock-print language applied to a travel dashboard** — washi-mint paper, indigo ink, one hanko-crimson accent, hairline borders instead of shadows, calm and legible on a phone in a train station. The pink sakura theme (and its falling-petal animation) is fully replaced. Where Mishka Hub is a cinema lobby and Michi is a walking trail, Japan 2026 is **the paper travel folder**: tickets, maps and a day-planner, printed beautifully.
 
-**Status: planned.** Token *values* are read from the canonical Aizome file (`learningLanguageMachine/apps/web/src/theme.css`, mirrored here byte-identical — [ARCHITECTURE.md](ARCHITECTURE.md) §10); this doc never restates hexes. Token names are frozen household law.
+**Status:** §1–§11 are the shipped visual contract; §12–§18 spec the **feature extension**'s surfaces ([PLAN.md](PLAN.md) Phases 7–13) — strictly within the same tokens, no new colours, ever. Token *values* are read from the canonical Aizome file (`learningLanguageMachine/apps/web/src/theme.css`, mirrored here byte-identical — [ARCHITECTURE.md](ARCHITECTURE.md) §10); this doc never restates hexes (the manifest/icon exception is documented in §12a). Token names are frozen household law.
 
 ---
 
@@ -65,8 +65,8 @@ Scale (rem-based px): `12 → 14 → 16 (body) → 18 → 20 → 24 → 30 → 3
 ## 4. App shell & navigation
 
 - **Header** — sticky, `bg-paper/95`, 1px `border-line` bottom (no blur, no shadow). Left: `ToriiMark` (§8) + wordmark `Japan <span class="text-clay">2026</span>` in `font-display`. Beneath the wordmark on ≥md: the route strip in mono `ink-soft` 12px — `20 SEP – 3 OCT · GLASGOW → TOKYO → FUJI → HIROSHIMA → OSAKA → KYOTO → HOME`. Right: theme toggle (icon button, Mishka spec) + "Sign out" ghost button (hidden in open mode; replaced by a `bg-oat text-ink-mid` "Sign-in off" pill).
-- **Desktop tab nav** (≥768px) — a second header row: 8 tabs (**Itinerary · Map · Ideas · Restaurants · Attractions · Animal cafés · Full data · Submit**) in `font-display` 14px; inactive `text-ink-soft`, hover `text-ink`, active `text-ink` + 2px `clay` underline (Michi's pattern). Row scrolls horizontally if cramped between 768–900px.
-- **Mobile bottom nav** (<768px) — fixed bottom bar, `bg-paper/95`, 1px `border-line` top, **5 items, 64px tall, safe-area padded** (Michi's convention): **Plan 🗓 · Map 🗺 · Ideas 💡 · Places ⛩ · Add ➕**. Active item: `clay` icon + label; inactive `ink-soft`. **Places** groups the four list views (Restaurants / Attractions / Animal cafés / Full data): tapping it opens the last-used of the four, and on mobile each of those views shows a segmented control at the top to switch between them. This *fixes* the current site's gap where Animal cafés and Full data were unreachable from the mobile nav. The old floating map FAB is dropped — Map has a permanent nav slot now.
+- **Desktop tab nav** (≥768px) — a second header row: 11 tabs (**Itinerary · Map · Ideas · Restaurants · Attractions · Animal cafés · Full data · Packing · Journal · Reference · Submit** — the last four before Submit are the extension's additions, [ARCHITECTURE.md](ARCHITECTURE.md) §13b) in `font-display` 14px; inactive `text-ink-soft`, hover `text-ink`, active `text-ink` + 2px `clay` underline (Michi's pattern). Row scrolls horizontally when cramped — with 11 tabs that now extends to roughly 768–1200px, which is fine (it already behaved this way).
+- **Mobile bottom nav** (<768px) — fixed bottom bar, `bg-paper/95`, 1px `border-line` top, **5 items, 64px tall, safe-area padded** (Michi's convention): **Plan 🗓 · Map 🗺 · Ideas 💡 · Places ⛩ · Add ➕** — **unchanged by the extension**. **Places** groups the four list views (Restaurants / Attractions / Animal cafés / Full data): tapping it opens the last-used of the four, and on mobile each of those views shows a segmented control at the top to switch between them. This *fixes* the current site's gap where Animal cafés and Full data were unreachable from the mobile nav. The old floating map FAB is dropped — Map has a permanent nav slot now. **The extension makes Plan a group on the identical mechanic**: Plan opens the last-used of Itinerary / Packing / Journal / Reference, and those four views show the same segmented control on mobile (`PLAN_TABS` beside `PLACES_TABS`; `lastPlanTab` beside `lastPlacesTab`). Every shipped item keeps its slot, icon and meaning.
 - Tab panels render in a `max-w-6xl` container, gutter 16px mobile / 32px desktop; bottom padding ≥80px on mobile so content clears the nav bar.
 
 ## 5. Component specs (deltas from the inherited Mishka §1e)
@@ -161,3 +161,85 @@ Almost none — this app is calm paper:
 - [ ] Contrast: §9's checklist passes at ≥4.5:1 (text) / ≥3:1 (UI) in both themes.
 - [ ] `prefers-reduced-motion` collapses all transitions; the app stays fully usable.
 - [ ] Lighthouse a11y ≥ 95 on Itinerary, Map, Ideas: labels on all icon buttons, the slot list keyboard-sortable, live region announces sync failures.
+
+Extension additions to this checklist (surfaces specced in §12–§18):
+
+- [ ] Every extension surface (packing, journal, reference, weather card, visited toggles, offline banner, update toast) resolves only Aizome tokens; the manifest/icon hexes are confined to the §12a exception files.
+- [ ] The mobile bottom nav still shows exactly the five shipped items; Plan's segmented control reaches all four grouped views; desktop shows all 11 tabs.
+- [ ] Visited dimming keeps card text ≥4.5:1 in both themes (dim via `text-ink-soft`/opacity on decoration, never below-contrast body text).
+- [ ] The `jp` utility is applied to every Japanese run in the Reference phrases and journal/packing user text can accept CJK (font-jp fallback chain holds).
+- [ ] Installed-app splash/status bar read as paper, both platforms; the app icon is legible at home-screen size next to the siblings' marks.
+- [ ] Lighthouse a11y ≥ 95 extends to Packing, Journal and Reference; the offline banner and update toast are announced via live regions.
+
+## 12. PWA surfaces (extension)
+
+The chrome the installed app wears. Mechanics in [ARCHITECTURE.md](ARCHITECTURE.md) §14 — this section is only what it looks like.
+
+### 12a. App icon & manifest colours
+
+- The icon set (§14e construction table) is drawn **from the existing favicon geometry**: clay torii on a paper ground, nothing added — the home-screen icon is the favicon, grown up. Maskable variant keeps all strokes inside the central 80%; the apple-touch-icon is opaque, full-bleed paper, square (iOS rounds it).
+- **Hex exception, extended and bounded:** the favicon SVG exception (§8) now covers exactly three artefacts — `public/torii-icon.svg`, the generated PNG icon set (via `scripts/generate-pwa-icons.mjs`'s two constants), and the manifest's `theme_color`/`background_color` in `vite.config.ts`. All carry a comment naming this section. Anywhere else, hexes remain a review-blocker.
+- Splash (iOS derives it): `background_color` paper + centred icon — calm, no wordmark, no gradient.
+
+### 12b. Offline banner (`OfflineBanner`)
+
+A slim strip directly under the header (above the tab row's content, never floating): `bg-oat text-ink-mid`, 12px `font-sans`, py-1.5, centred — "Offline — showing the last synced copy". Appears/disappears on the `online`/`offline` events with the standard 150ms fade; `role="status"` so it's announced. No icon, no dismiss button — it isn't an error, it's a state of the world. It coexists with the itinerary's sync whisper (§6.6), which stays the per-surface truth about writes.
+
+### 12c. Update toast (`UpdateToast`)
+
+The inherited toast spec (§5) verbatim: bottom-centre, `bg-ink text-paper rounded-lg shadow-float` — "A new version is ready" with a single **Refresh** text button in `clay`'s dark-legible pairing (`text-paper` underlined on `bg-ink` is fine; no second accent). It does **not** auto-dismiss (unlike 4s toasts — an update prompt should wait), stacks above the mobile nav, and dismissing (✕) simply defers to next launch. Never interrupts an in-progress edit: it renders, it doesn't reload.
+
+## 13. Today view highlights (extension)
+
+Behaviour in [ARCHITECTURE.md](ARCHITECTURE.md) §15; the visual layer is three quiet touches, all reusing §6's vocabulary:
+
+1. **Today's day pill**: when `tripDayFor(now)` matches a pill, that pill gains a 4px `clay` dot centred under its leg tick (visible in active *and* inactive states — it marks the date, not the selection). Tooltip/subline text gains "· today".
+2. **The "now" slot marker**: the current slot's row (§15's parse rules) gets a `border-line-strong` border upgrade plus a mono 11px `text-clay` "NOW" kicker right-aligned in the time column, under the time label. The *next* slot (when no slot has started yet) gets "NEXT" in `text-ink-soft` instead. No background tint — the surprise slot (§6.4) keeps its monopoly on row tints.
+3. **The auto-scroll**: one-shot, `block: 'center'`; under `prefers-reduced-motion` it jumps without smooth scrolling. Never repeats while the tab stays mounted.
+
+## 14. Visited toggle & visited cards (extension)
+
+- **`VisitedToggle`** renders in `PlaceCard`'s top-right column (with cost/links): a 24px circular ghost button, `border border-line-strong text-cloud`, hover `text-ink-soft`; visited state `bg-olive border-olive text-paper` with a 14px tick glyph. `aria-pressed` + label "Mark as visited"/"Visited — tap to unmark". Touch target padded to 44px (invisible hit area, same trick as the slot handle).
+- **Visited card state**: the card stays fully readable — dimming is decoration-only. The title colour drops to `text-ink-soft` (no strikethrough — visited places still get talked about), the card border stays `border-line`, and a **"Visited" pill** in the §5 ok-style (`bg-olive/15 text-olive`, 11px) joins the meta pills row. Body text, fields and links keep their shipped colours; contrast is never sacrificed to a status.
+- Appears on Ideas, Restaurants, Attractions, Animal cafés and Full data cards; **not** on accommodations/events (DATA_MODEL.md §10a) and not on map popups (the popup stays read-only; the list is the management surface).
+- Optimistic flip, instant; failures use the standard quiet inline note pattern (§5 toasts/notes).
+
+## 15. Packing checklist (extension)
+
+`PackingPage` deliberately reads as "the itinerary's calmer sibling" (the household's muscle memory, minus the machinery):
+
+1. **Header row**: display-font title "Packing", right-aligned mono 12px `text-ink-soft` whole-trip count — "14 of 24 packed".
+2. **Category groups** in DATA_MODEL.md §11a order, each: mono kicker (`DOCUMENTS`, 11–12px, +0.08em, uppercase, `text-ink-soft`) + per-category count ("3 of 6", mono 11px) + its items.
+3. **`PackingRow`** (mirrors `SlotRow` minus time/type-edge/drag): min-height 44px, `bg-paper-mid border border-line rounded-md`, 8px gap. Anatomy: **checkbox** — 20px `rounded-sm border border-line-strong bg-paper`; checked `bg-olive border-olive` with a `paper` tick; the whole row is the tap target (label wraps the row), 150ms fill transition. **Label** — 14px `text-ink`, editable in place exactly like slot text (focus ring `2px clay`, blur/600ms commit); checked items drop to `text-ink-soft` — **no strikethrough** (a packed passport still needs to be findable in the list at 5 a.m.). **Remove** — the §6.4 ✕ ghost button verbatim, with the 5s undo toast.
+4. **`AddItemRow`** per category: the §6.5 dashed composer, simplified — text input + "Add" primary button only (no time, no type). New items append at the category's end.
+5. **No drag handles** (DATA_MODEL.md §11e — schema-ready, UI deliberately omitted). No section collapse either: ~24 items don't earn it.
+6. **Sync whisper**: the §6.6 line, verbatim component, under the last group.
+
+## 16. Weather card (extension)
+
+One compact card, rendered between `DayHeader` and the slot list, only when the selected day's leg has a city (never for day 14 / `Home`). Anatomy — a single `bg-paper-mid border border-line rounded-lg px-4 py-3` row:
+
+- Left: condition emoji (20px) + current temp in `font-display` 20px `text-ink` ("21°") + condition label 13px `text-ink-mid` ("Mostly clear").
+- Right, mono 12px `text-ink-soft`, one line: `H 24° · L 17° · ☂ 30%` (high/low + rain chance for the shown day; the rain figure only when the API returns one).
+- Kicker above the row content, mono 11px uppercase `text-ink-soft`: `TOKYO · TODAY` / `TOKYO · WED 23 SEP` (selected-day forecast, when within the horizon) / `TOKYO · RIGHT NOW` (current-conditions fallback, e.g. pre-trip). Stale-cache state appends "· as of 14:20" in `text-kraft`.
+- **States it does not have**: no loading spinner (renders nothing until first data), no error state (hides — [ARCHITECTURE.md](ARCHITECTURE.md) §18), no tap/expand behaviour. Emoji come from the DATA_MODEL.md §13b table; no icon font, no images, no new colours.
+
+## 17. Quick-reference page (extension)
+
+Static content ([DATA_MODEL.md](DATA_MODEL.md) §15 is canonical — implementation transcribes, never rewrites), presented as three sections in one column (`max-w-2xl` — it's reading matter, not a dashboard):
+
+1. **Emergency** — a `bg-paper-mid border border-line rounded-lg p-4` card, deliberately first and unmissable: the two numbers set huge in `font-mono` (30px, `text-ink`) with 13px labels — **110** Police · **119** Fire / ambulance — plus the note line, and the gov.uk link (standard `clay` link, labelled "UK travel advice for Japan — check before you go, including embassy contact"). No other card on this page uses numbers this large; hierarchy is the safety feature.
+2. **Phrases** — the §15b table as rows: Japanese in `font-jp` 16px `text-ink` (the one place the app sets Japanese *as content*, so the `jp` utility is mandatory), rōmaji in `font-mono` 12px `text-ink-soft`, English 13px `text-ink-mid`. Row dividers `border-line`; no card-per-phrase (it's a crib sheet, density is the point).
+3. **Etiquette & practicalities** — the §15c list as plain 14px `text-ink-mid` bullets with `text-ink-soft` markers. No emoji bullets, no illustration — one seigaiha scallop empty-state motif is permitted at the foot of the page (§8's "quiet illustration" clause), nothing else.
+
+Tone check is part of review: practical, calm, British English, zero exclamation marks — the §15 content already complies; don't "improve" it.
+
+## 18. Journal (extension)
+
+`JournalPage`, top to bottom:
+
+1. **`EntryComposer`** (top, always visible — writing tonight's entry is the primary act mid-trip): a `bg-paper-mid border border-line rounded-lg p-4` card with a date input (inherited input spec, `font-mono`, defaults to today), a 3-row auto-growing textarea (placeholder: "What happened today?" — serif is *not* used here; body font, it's an input), a **photo attach** ghost button ("＋ Photo", `text-ink-soft`, hidden in open mode) showing a 64px `rounded-md` thumbnail preview with a ✕ once chosen, and one primary "Add entry" button (`bg-clay` — this page's single accent, §5 rule). A quiet mono 11px note under the composer: "Photos are resized on your phone before upload." Upload-in-flight: the thumbnail at 50% opacity with the standard inline note — no progress bars.
+2. **Entry list**, newest first, grouped by date. **`EntryCard`**: `bg-paper-mid border border-line rounded-lg p-4`; mono kicker `TUE 22 SEP · DAY 3` (day number only when the date is inside the trip window — DATA_MODEL.md §12a); body 14px `text-ink` `leading-relaxed`; photo (when present) below the text as `rounded-md w-full max-h-80 object-cover`, `loading="lazy"`, `bg-paper-deep` placeholder while the signed URL resolves. Offline with an uncached photo: the placeholder simply stays — no broken-image state.
+3. **Edit/delete**: an "Edit" ghost button per card swaps the card into composer mode in place (same fields); delete is the ✕-with-5s-undo pattern (§6.4) — the undo restores text + `photoPath` (the object survives deletion attempts until the row goes; ARCHITECTURE.md §19).
+4. **Empty state**: serif one-liner (§3's sanctioned use) — "The first page is yours." — over a single seigaiha scallop.
+5. **Sync whisper**: §6.6 line at the foot. No attribution anywhere on any surface — no names, no initials, no "who wrote this" affordance of any kind (house law).

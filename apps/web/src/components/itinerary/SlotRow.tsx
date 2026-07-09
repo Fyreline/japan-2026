@@ -24,9 +24,11 @@ const TYPE_LABEL: Record<SlotType, string> = {
 }
 
 /** One slot row — type edge, time, editable text, type/time popover, drag
- * handle, remove (DESIGN.md §6.4). */
+ * handle, remove (DESIGN.md §6.4). `marked` drives the Today view's NOW/NEXT
+ * kicker (DESIGN.md §13.2). */
 export function SlotRow({
   slot,
+  marked,
   onCommitText,
   onChangeType,
   onChangeTime,
@@ -35,6 +37,7 @@ export function SlotRow({
   onRemove,
 }: {
   slot: ItinerarySlot
+  marked?: 'now' | 'next' | null
   onCommitText(text: string): void
   onChangeType(type: SlotType): void
   onChangeTime(time: string): void
@@ -94,9 +97,10 @@ export function SlotRow({
   return (
     <div
       ref={setNodeRef}
+      data-slot-key={slot.slotKey}
       style={style}
       className={`group relative flex min-h-12 items-stretch gap-2 overflow-hidden rounded-md border bg-paper-mid ${
-        isDragging ? 'border-clay shadow-float' : 'border-line'
+        isDragging ? 'border-clay shadow-float' : marked ? 'border-line-strong' : 'border-line'
       } ${slot.type === 'surprise' ? 'bg-clay/8' : ''}`}
     >
       <span aria-hidden className={`w-1 shrink-0 ${EDGE_CLASS[slot.type]}`} />
@@ -150,8 +154,10 @@ export function SlotRow({
         )}
       </div>
 
-      <span className="w-14 shrink-0 self-center text-right font-mono text-xs text-ink-soft">
+      <span className="flex w-14 shrink-0 flex-col items-end justify-center self-center text-right font-mono text-xs text-ink-soft">
         {slot.time}
+        {marked === 'now' && <span className="text-[11px] text-clay">NOW</span>}
+        {marked === 'next' && <span className="text-[11px] text-ink-soft">NEXT</span>}
       </span>
 
       <input

@@ -1,16 +1,22 @@
 import { useState } from 'react'
 import { useAuth } from './auth/useAuth'
 import { useSubmittedSpots } from './hooks/useSubmittedSpots'
+import { useVisited } from './hooks/useVisited'
 import { IDEAS } from './data/ideas'
 import { ACCOMMODATIONS } from './data/accommodations'
-import { PLACES_TAB_IDS, type TabId } from './tabs'
+import { PLACES_TAB_IDS, PLACES_TABS, PLAN_TAB_IDS, PLAN_TABS, type TabId } from './tabs'
 import type { MapFocus } from './mapFocus'
 import { Header } from './components/Header'
 import { TabNav } from './components/TabNav'
 import { MobileNav } from './components/MobileNav'
 import { SeigaihaBand } from './components/Seigaiha'
+import { OfflineBanner } from './components/OfflineBanner'
+import { UpdateToast } from './components/UpdateToast'
 import { LoginScreen } from './components/LoginScreen'
 import { ItineraryPage } from './components/itinerary/ItineraryPage'
+import { PackingPage } from './components/packing/PackingPage'
+import { JournalPage } from './components/journal/JournalPage'
+import { ReferencePage } from './components/reference/ReferencePage'
 import { MapView } from './components/MapView'
 import { IdeasList } from './components/IdeasList'
 import { RestaurantsList } from './components/RestaurantsList'
@@ -18,19 +24,22 @@ import { AttractionsList } from './components/AttractionsList'
 import { AnimalCafesList } from './components/AnimalCafesList'
 import { FullDataList } from './components/FullDataList'
 import { SubmitForm } from './components/SubmitForm'
-import { PlacesSegmented } from './components/PlacesSegmented'
+import { SegmentedTabs } from './components/SegmentedTabs'
 
 export default function App() {
   const auth = useAuth()
   const { restaurants, attractions, animalCafes, submit } = useSubmittedSpots(auth.state)
+  const visited = useVisited(auth.state)
 
   const [activeTab, setActiveTab] = useState<TabId>('itinerary')
   const [lastPlacesTab, setLastPlacesTab] = useState<TabId>('restaurants')
+  const [lastPlanTab, setLastPlanTab] = useState<TabId>('itinerary')
   const [mapFocus, setMapFocus] = useState<MapFocus | null>(null)
 
   function selectTab(id: TabId) {
     setActiveTab(id)
     if (PLACES_TAB_IDS.includes(id)) setLastPlacesTab(id)
+    if (PLAN_TAB_IDS.includes(id)) setLastPlanTab(id)
   }
 
   function seeOnMap(focus: MapFocus) {
@@ -48,10 +57,12 @@ export default function App() {
   }
 
   const isPlaces = PLACES_TAB_IDS.includes(activeTab)
+  const isPlan = PLAN_TAB_IDS.includes(activeTab)
 
   return (
     <div className="flex min-h-full flex-col bg-paper">
       <Header auth={auth.state} onSignOut={auth.signOut} />
+      <OfflineBanner />
       <TabNav active={activeTab} onSelect={selectTab} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 pt-5 md:px-8 md:pb-10">
@@ -68,20 +79,29 @@ export default function App() {
           />
         </div>
 
-        {activeTab === 'itinerary' && <ItineraryPage auth={auth.state} />}
-        {activeTab === 'ideas' && <IdeasList onSeeOnMap={seeOnMap} />}
+        {isPlan && (
+          <>
+            <SegmentedTabs tabs={PLAN_TABS} active={activeTab} onSelect={selectTab} />
+            {activeTab === 'itinerary' && <ItineraryPage auth={auth.state} />}
+            {activeTab === 'packing' && <PackingPage auth={auth.state} />}
+            {activeTab === 'journal' && <JournalPage auth={auth.state} />}
+            {activeTab === 'reference' && <ReferencePage />}
+          </>
+        )}
+
+        {activeTab === 'ideas' && <IdeasList onSeeOnMap={seeOnMap} visited={visited} />}
 
         {isPlaces && (
           <>
-            <PlacesSegmented active={activeTab} onSelect={selectTab} />
+            <SegmentedTabs tabs={PLACES_TABS} active={activeTab} onSelect={selectTab} />
             {activeTab === 'restaurants' && (
-              <RestaurantsList entries={restaurants} onSeeOnMap={seeOnMap} />
+              <RestaurantsList entries={restaurants} onSeeOnMap={seeOnMap} visited={visited} />
             )}
             {activeTab === 'attractions' && (
-              <AttractionsList entries={attractions} onSeeOnMap={seeOnMap} />
+              <AttractionsList entries={attractions} onSeeOnMap={seeOnMap} visited={visited} />
             )}
             {activeTab === 'animalCafes' && (
-              <AnimalCafesList entries={animalCafes} onSeeOnMap={seeOnMap} />
+              <AnimalCafesList entries={animalCafes} onSeeOnMap={seeOnMap} visited={visited} />
             )}
             {activeTab === 'fullData' && (
               <FullDataList
@@ -89,6 +109,7 @@ export default function App() {
                 attractions={attractions}
                 animalCafes={animalCafes}
                 onSeeOnMap={seeOnMap}
+                visited={visited}
               />
             )}
           </>
@@ -106,7 +127,13 @@ export default function App() {
         </div>
       </footer>
 
-      <MobileNav active={activeTab} placesTarget={lastPlacesTab} onSelect={selectTab} />
+      <MobileNav
+        active={activeTab}
+        planTarget={lastPlanTab}
+        placesTarget={lastPlacesTab}
+        onSelect={selectTab}
+      />
+      <UpdateToast />
     </div>
   )
 }

@@ -111,6 +111,151 @@ alter table public.itinerary_slots replica identity full;
 > The itinerary table needs the full read/edit/delete set (not just read/add) because
 > slots get typed into, dragged around and removed, not just appended.
 
+Then **New query** again → paste the visited-marks table (`supabase/migrations/0002_visited_marks.sql`) → **Run**:
+
+```sql
+create table if not exists public.visited_marks (
+  id bigint generated always as identity primary key,
+  item_key text not null unique,
+  created_at timestamptz not null default now()
+);
+
+alter table public.visited_marks enable row level security;
+
+create policy "signed-in can read visits"
+  on public.visited_marks for select
+  to authenticated using (true);
+
+create policy "signed-in can add visits"
+  on public.visited_marks for insert
+  to authenticated with check (true);
+
+create policy "signed-in can remove visits"
+  on public.visited_marks for delete
+  to authenticated using (true);
+
+alter publication supabase_realtime add table public.visited_marks;
+alter table public.visited_marks replica identity full;
+```
+
+Then the packing checklist (`supabase/migrations/0003_packing_items.sql`) → **Run**:
+
+```sql
+create table if not exists public.packing_items (
+  id bigint generated always as identity primary key,
+  item_key text not null unique,
+  category text not null default 'other'
+    check (category in ('documents','electronics','clothing','health','other')),
+  label text not null default '',
+  checked boolean not null default false,
+  "position" double precision not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists packing_items_category_position
+  on public.packing_items (category, "position");
+
+create trigger packing_items_updated_at
+  before update on public.packing_items
+  for each row execute procedure extensions.moddatetime (updated_at);
+
+alter table public.packing_items enable row level security;
+
+create policy "signed-in can read packing"
+  on public.packing_items for select
+  to authenticated using (true);
+
+create policy "signed-in can add packing"
+  on public.packing_items for insert
+  to authenticated with check (true);
+
+create policy "signed-in can edit packing"
+  on public.packing_items for update
+  to authenticated using (true) with check (true);
+
+create policy "signed-in can remove packing"
+  on public.packing_items for delete
+  to authenticated using (true);
+
+alter publication supabase_realtime add table public.packing_items;
+alter table public.packing_items replica identity full;
+```
+
+Then the journal — a table **and** a private photo bucket in one paste
+(`supabase/migrations/0004_journal.sql`) → **Run**:
+
+```sql
+create table if not exists public.journal_entries (
+  id bigint generated always as identity primary key,
+  entry_key text not null unique,
+  entry_date date not null,
+  body text not null default '',
+  photo_path text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists journal_entries_date
+  on public.journal_entries (entry_date, created_at);
+
+create trigger journal_entries_updated_at
+  before update on public.journal_entries
+  for each row execute procedure extensions.moddatetime (updated_at);
+
+alter table public.journal_entries enable row level security;
+
+create policy "signed-in can read journal"
+  on public.journal_entries for select
+  to authenticated using (true);
+
+create policy "signed-in can add journal"
+  on public.journal_entries for insert
+  to authenticated with check (true);
+
+create policy "signed-in can edit journal"
+  on public.journal_entries for update
+  to authenticated using (true) with check (true);
+
+create policy "signed-in can remove journal"
+  on public.journal_entries for delete
+  to authenticated using (true);
+
+alter publication supabase_realtime add table public.journal_entries;
+alter table public.journal_entries replica identity full;
+
+-- the private photo bucket
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('journal-photos', 'journal-photos', false, 5242880,
+        array['image/jpeg', 'image/webp'])
+on conflict (id) do nothing;
+
+-- who can use it — same "signed-in only" rule as everything else
+create policy "signed-in can read journal photos"
+  on storage.objects for select
+  to authenticated using (bucket_id = 'journal-photos');
+
+create policy "signed-in can add journal photos"
+  on storage.objects for insert
+  to authenticated with check (bucket_id = 'journal-photos');
+
+create policy "signed-in can replace journal photos"
+  on storage.objects for update
+  to authenticated using (bucket_id = 'journal-photos')
+  with check (bucket_id = 'journal-photos');
+
+create policy "signed-in can remove journal photos"
+  on storage.objects for delete
+  to authenticated using (bucket_id = 'journal-photos');
+```
+
+**Check the photo bucket is actually locked down** before trusting it with real photos:
+left sidebar → **Storage** → you should see a `journal-photos` bucket marked **Private**.
+Then, without signing in anywhere, try opening
+`https://<your-project-ref>.supabase.co/storage/v1/object/journal-photos/anything.jpg`
+in a normal browser tab — it should come back with an error, not a picture. That confirms
+photos are only reachable from inside the signed-in app.
+
 ## 3. Create your two accounts
 
 1. Left sidebar → **Authentication** → **Users** → **Add user** → **Create new user**.
@@ -167,9 +312,10 @@ The next push to `main` bakes them into the deployed build.
 ### Is it safe to put the anon key in a variable (even on a public repo)?
 
 Yes. The **anon / publishable** key is meant to live in front-end code. It can't read or
-write anything on its own — the row-level security from step 2 means both tables are only
-reachable **after** someone signs in with a real account. Never put the *service_role* key
-anywhere in this repo, its env files, or its Actions variables; you don't need it here.
+write anything on its own — the row-level security from step 2 means every table (and the
+journal photo bucket) is only reachable **after** someone signs in with a real account.
+Never put the *service_role* key anywhere in this repo, its env files, or its Actions
+variables; you don't need it here.
 
 > Note: the site's **static content** (ideas, restaurant lists, the itinerary seed text)
 > still lives in the built JS, so on a **public** GitHub repo someone could read those from
@@ -181,6 +327,9 @@ anywhere in this repo, its env files, or its Actions variables; you don't need i
 
 ### Wipe test data later?
 
-SQL Editor → `delete from public.submitted_spots;` or `delete from public.itinerary_slots;`
-→ Run. Deleting all itinerary rows means the next signed-in load re-seeds the trip plan
-from scratch (the app upserts the built-in seed whenever the table is empty).
+SQL Editor → `delete from public.submitted_spots;`, `delete from public.itinerary_slots;`,
+`delete from public.visited_marks;`, `delete from public.packing_items;` or
+`delete from public.journal_entries;` → Run. Deleting all itinerary or packing rows means
+the next signed-in load re-seeds them from scratch (the app upserts the built-in seed
+whenever a table is empty). Deleting journal rows doesn't remove their photos — do that
+from **Storage → journal-photos** separately if you want them gone too.

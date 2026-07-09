@@ -1,7 +1,10 @@
-import { PLACES_TAB_IDS, type TabId } from '../tabs'
+import { PLACES_TAB_IDS, PLAN_TAB_IDS, type TabId } from '../tabs'
 
 const ITEMS: { icon: string; label: string; target: TabId; group?: TabId[] }[] = [
-  { icon: '🗓', label: 'Plan', target: 'itinerary' },
+  // "Plan" groups Itinerary/Packing (growing to Journal/Reference in
+  // Phases 11–12) — opens the last-used of them, same mechanic as Places
+  // (ARCHITECTURE.md §13b).
+  { icon: '🗓', label: 'Plan', target: 'itinerary', group: PLAN_TAB_IDS },
   { icon: '🗺', label: 'Map', target: 'map' },
   { icon: '💡', label: 'Ideas', target: 'ideas' },
   // "Places" groups the four list views — opens the last-used of them
@@ -12,13 +15,16 @@ const ITEMS: { icon: string; label: string; target: TabId; group?: TabId[] }[] =
 ]
 
 /** Fixed bottom bar (<768px), 5 items, 64px tall, safe-area padded
- * (DESIGN.md §4). */
+ * (DESIGN.md §4) — unchanged by the extension; Plan and Places are groups on
+ * the same mechanic. */
 export function MobileNav({
   active,
+  planTarget,
   placesTarget,
   onSelect,
 }: {
   active: TabId
+  planTarget: TabId
   placesTarget: TabId
   onSelect(id: TabId): void
 }) {
@@ -31,7 +37,7 @@ export function MobileNav({
         const isActive = item.group
           ? item.group.includes(active)
           : item.target === active
-        const target = item.group ? placesTarget : item.target
+        const target = item.label === 'Plan' ? planTarget : item.label === 'Places' ? placesTarget : item.target
         return (
           <button
             key={item.label}

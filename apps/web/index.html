@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="torii-icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Japan 2026</title>
+
+    <!-- iOS PWA install (ARCHITECTURE.md §14c). iOS has no install prompt —
+         Safari → Share → Add to Home Screen is the only path; these tags are
+         what makes that produce a real standalone app (own icon, no Safari
+         chrome) instead of a bookmark. iOS reads apple-touch-icon, not the
+         manifest icons. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Japan 2026" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <script>
       // Apply the theme class before first paint to avoid a flash of the
       // wrong theme (ARCHITECTURE.md §9). Mirrors src/hooks/useTheme.ts:

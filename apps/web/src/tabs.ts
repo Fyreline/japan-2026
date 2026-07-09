@@ -6,9 +6,12 @@ export type TabId =
   | 'attractions'
   | 'animalCafes'
   | 'fullData'
+  | 'packing'
+  | 'journal'
+  | 'reference'
   | 'submit'
 
-// Desktop tab row — 8 views (DESIGN.md §4).
+// Desktop tab row — 11 views (DESIGN.md §4).
 export const DESKTOP_TABS: { id: TabId; label: string }[] = [
   { id: 'itinerary', label: 'Itinerary' },
   { id: 'map', label: 'Map' },
@@ -17,6 +20,9 @@ export const DESKTOP_TABS: { id: TabId; label: string }[] = [
   { id: 'attractions', label: 'Attractions' },
   { id: 'animalCafes', label: 'Animal cafés' },
   { id: 'fullData', label: 'Full data' },
+  { id: 'packing', label: 'Packing' },
+  { id: 'journal', label: 'Journal' },
+  { id: 'reference', label: 'Reference' },
   { id: 'submit', label: 'Submit' },
 ]
 
@@ -30,3 +36,14 @@ export const PLACES_TABS: { id: TabId; label: string }[] = [
 ]
 
 export const PLACES_TAB_IDS = PLACES_TABS.map((t) => t.id)
+
+// The "Plan" group on the mobile bottom nav (ARCHITECTURE.md §13b) — Plan
+// opens the last-used of these, which show a segmented control on mobile.
+export const PLAN_TABS: { id: TabId; label: string }[] = [
+  { id: 'itinerary', label: 'Itinerary' },
+  { id: 'packing', label: 'Packing' },
+  { id: 'journal', label: 'Journal' },
+  { id: 'reference', label: 'Reference' },
+]
+
+export const PLAN_TAB_IDS = PLAN_TABS.map((t) => t.id)

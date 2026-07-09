@@ -1,3 +1,5 @@
+import { VisitedToggle } from './VisitedToggle'
+
 const CJK = /[　-〿぀-ヿ㐀-䶿一-鿿＀-￯]/
 
 export interface CardField {
@@ -24,6 +26,10 @@ export interface PlaceCardProps {
   /** shown as a "User Submission" badge */
   badge?: string
   onSeeOnMap?: () => void
+  /** Visited toggle (DESIGN.md §14) — omit both to hide the control entirely
+   * (accommodations/events cards get no toggle, DATA_MODEL.md §10a). */
+  visited?: boolean
+  onToggleVisited?: () => void
 }
 
 /** Shared list card — idea / restaurant / attraction / café / full-data
@@ -39,8 +45,11 @@ export function PlaceCard({
   source,
   badge,
   onSeeOnMap,
+  visited,
+  onToggleVisited,
 }: PlaceCardProps) {
   const titleJp = CJK.test(title)
+  const showVisited = onToggleVisited !== undefined
   return (
     <article className="rounded-lg border border-line bg-paper-mid p-4 transition hover:border-line-strong">
       <div className="flex items-start justify-between gap-3">
@@ -51,14 +60,19 @@ export function PlaceCard({
             </p>
           )}
           <h3
-            className={`font-display text-base font-medium text-ink ${titleJp ? 'jp' : ''}`}
+            className={`font-display text-base font-medium ${visited ? 'text-ink-soft' : 'text-ink'} ${titleJp ? 'jp' : ''}`}
           >
             {title}
           </h3>
-          {pills && pills.length > 0 && (
+          {(pills?.some(Boolean) || visited) && (
             <div className="mt-2 flex flex-wrap gap-1.5">
+              {visited && (
+                <span className="rounded-full bg-olive/15 px-2.5 py-0.5 text-[11px] font-medium text-olive">
+                  Visited
+                </span>
+              )}
               {pills
-                .filter(Boolean)
+                ?.filter(Boolean)
                 .map((p, i) => (
                   <span
                     key={i}
@@ -71,6 +85,9 @@ export function PlaceCard({
           )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
+          {showVisited && (
+            <VisitedToggle visited={!!visited} onToggle={onToggleVisited!} />
+          )}
           {cost && (
             <span className="font-mono text-xs text-ink-mid">{cost}</span>
           )}

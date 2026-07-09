@@ -1,18 +1,20 @@
-import { PLACES_TABS, type TabId } from '../tabs'
+import type { TabId } from '../tabs'
 
-/** Mobile-only segmented control that switches between the four list views —
- * fixes the old site's gap where Animal cafés + Full data had no mobile route
- * (DESIGN.md §4). Hidden on desktop, where the tab row covers all four. */
-export function PlacesSegmented({
+/** Mobile-only segmented control shared by the Places and Plan nav groups
+ * (DESIGN.md §4, ARCHITECTURE.md §13b). Hidden on desktop, where the tab
+ * row already reaches every view directly. */
+export function SegmentedTabs({
+  tabs,
   active,
   onSelect,
 }: {
+  tabs: { id: TabId; label: string }[]
   active: TabId
   onSelect(id: TabId): void
 }) {
   return (
     <div className="mb-4 flex gap-1 overflow-x-auto rounded-full border border-line bg-paper-mid p-1 md:hidden">
-      {PLACES_TABS.map((tab) => {
+      {tabs.map((tab) => {
         const isActive = tab.id === active
         return (
           <button

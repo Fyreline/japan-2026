@@ -8,8 +8,10 @@ import {
   entryCardPills,
   entryFocus,
 } from '../data/entryView'
+import { itemKeyForEntry, itemKeyForIdea } from '../data/itemKey'
 import type { CardField, CardLink } from './PlaceCard'
 import type { MapFocus } from '../mapFocus'
+import type { UseVisited } from '../hooks/useVisited'
 import { FilterPills, type PillOption } from './FilterPills'
 import { SearchInput } from './SearchInput'
 import { PlaceCard } from './PlaceCard'
@@ -35,6 +37,9 @@ interface FullEntry {
   badge?: string
   focus: MapFocus | null
   search: string
+  /** Visited-mark key — absent for accommodation/event rows (DATA_MODEL.md
+   * §10a: you don't tick off your own hotel; no toggle on those cards). */
+  itemKey?: string
 }
 
 const PRIMARY_ORDER: Primary[] = [
@@ -65,6 +70,7 @@ function placeToFull(e: PlaceEntry, primary: Primary): FullEntry {
     badge: e.source === 'User Submission' ? 'User Submission' : undefined,
     focus: entryFocus(e),
     search: [e.name, e.city, e.category, e.type, e.description].join(' ').toLowerCase(),
+    itemKey: itemKeyForEntry(e),
   }
 }
 
@@ -73,11 +79,13 @@ export function FullDataList({
   attractions,
   animalCafes,
   onSeeOnMap,
+  visited,
 }: {
   restaurants: PlaceEntry[]
   attractions: PlaceEntry[]
   animalCafes: PlaceEntry[]
   onSeeOnMap(f: MapFocus): void
+  visited: UseVisited
 }) {
   const [primary, setPrimary] = useState<'All' | Primary>('All')
   const [sub, setSub] = useState('All')
@@ -124,6 +132,7 @@ export function FullDataList({
       search: [idea.title, idea.city, idea.suburb, idea.tag, idea.description]
         .join(' ')
         .toLowerCase(),
+      itemKey: itemKeyForIdea(idea),
     }))
     return [
       ...acc,
@@ -226,6 +235,10 @@ export function FullDataList({
                 fields={entry.fields}
                 links={entry.links}
                 badge={entry.badge}
+                visited={entry.itemKey ? visited.isVisited(entry.itemKey) : undefined}
+                onToggleVisited={
+                  entry.itemKey ? () => visited.toggle(entry.itemKey!) : undefined
+                }
                 onSeeOnMap={
                   entry.focus
                     ? () => onSeeOnMap({ ...entry.focus!, nonce: Date.now() })

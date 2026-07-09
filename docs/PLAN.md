@@ -4,6 +4,8 @@ Docs-first (this suite), then phased implementation with explicit owners per tas
 
 What we're building (one line): the current single-file pink static site becomes a React + Vite + TypeScript + Tailwind v4 SPA in the sibling apps' exact stack, wearing the shared Aizome palette, with every existing feature preserved and one big upgrade — a time-slot itinerary that both travellers can edit, reorder and watch sync live ([ARCHITECTURE.md](ARCHITECTURE.md)).
 
+**Phases 1–6 are shipped** — the site above is live. **Phases 7–13 are the feature extension** ([ARCHITECTURE.md](ARCHITECTURE.md) §13–19): installable PWA/offline, Today view, visited marks, packing checklist, weather card, quick reference, trip journal. Same ownership policy: [Opus] builds anything with judgement in it; [Sonnet] takes the mechanical, fully-specced follow-up. Every shipped behaviour must keep working through every extension phase — regressions are stop-and-fix, not follow-ups.
+
 | Phase | Scope | Owner | Spec |
 |---|---|---|---|
 | 1 | Scaffold & shell: Vite app, tokens, fonts, nav, theme toggle, auth gate, deploy workflow | Opus | ARCHITECTURE §2–5, §9–11 · DESIGN §2–5 |
@@ -12,8 +14,15 @@ What we're building (one line): the current single-file pink static site becomes
 | 4 | Itinerary engine: seed, day pills, slot editing, dnd-kit reorder, `itinerary_slots` sync + realtime + fallback | Opus | DATA_MODEL §6 · API §3 · DESIGN §6 |
 | 5 | Cutover & ops: legacy file removal, README/SUPABASE_SETUP rewrites, migration file, .env.example, launch.json, theme-sync registration | Sonnet | DEPLOYMENT · ARCHITECTURE §10 |
 | 6 | End-to-end verification against every doc's acceptance list, deploy check | Opus | all acceptance sections |
+| 7 | PWA & offline: vite-plugin-pwa, manifest, icon set + script, iOS meta, SW caching, offline banner, update toast | Opus | ARCHITECTURE §14 · DESIGN §12 |
+| 8 | Today view + weather card: trip-window logic, day auto-select, now marker, Open-Meteo fetch + cache | Opus | DATA_MODEL §13–14 · API §8 · ARCHITECTURE §15, §18 · DESIGN §13, §16 |
+| 9 | Visited marks: `visited_marks` table, canonical item keys, toggle on all place/idea cards, realtime | Opus | DATA_MODEL §10 · API §5 · ARCHITECTURE §16 · DESIGN §14 |
+| 10 | Packing checklist: `packing_items` table + seed, packing tab, mobile Plan group | Opus | DATA_MODEL §11 · API §6 · ARCHITECTURE §13b, §17 · DESIGN §15 |
+| 11 | Journal + Storage: `journal_entries` table, `journal-photos` bucket + policies, image compression, journal tab | Opus | DATA_MODEL §12 · API §7 · ARCHITECTURE §19 · DESIGN §18 |
+| 12 | Reference tab + extension paperwork: quick-reference content, migrations 0002–0004 committed, README/SUPABASE_SETUP additions | Sonnet | DATA_MODEL §15 · DESIGN §17 · DEPLOYMENT §3 |
+| 13 | Extension verification: install drills, offline drills, three-table realtime, storage RLS probe, full regression sweep | Opus | all extension acceptance sections |
 
-Sequencing: 1 → 2 → 3 → 4 → 5 → 6, strictly — each phase builds on the previous one's verified state, and this repo has no parallel tracks worth the coordination cost. Phases land as commits on `main` (two-person repo, no PR ceremony), message prefix `phase-N:`.
+Sequencing: strictly linear within each block — 1 → … → 6 (done), then 7 → … → 13 — each phase builds on the previous one's verified state, and this repo has no parallel tracks worth the coordination cost. Phases land as commits on `main` (two-person repo, no PR ceremony), message prefix `phase-N:`.
 
 ---
 
@@ -79,6 +88,81 @@ Mechanical, well-specified, no design judgment. **Do not touch `apps/web/src` lo
 - [ ] [Opus] Lighthouse a11y ≥95 on Itinerary/Map/Ideas; reduced-motion pass; no console errors; network panel shows no CDN font/script fetches.
 
 **Acceptance:** every box in every doc's checklist ticked or logged as a deliberate follow-up in this file; the household can plan dinner on two phones and watch it sync.
+
+---
+
+# Extension phases (7–13)
+
+## Phase 7 — PWA & offline [Opus]
+
+The foundation the rest of the extension sits on, and the household's first PWA — the config is the pattern Mishka/Michi copy later (ARCHITECTURE §14).
+
+- [ ] [Opus] Add `vite-plugin-pwa` + `sharp` as devDependencies (justifications already written — ARCHITECTURE §3); `VitePWA()` in `vite.config.ts` per ARCHITECTURE §14a: `registerType: 'prompt'`, manifest per §14b with `start_url`/`scope`/`navigateFallback` computed from `VITE_BASE` (never hardcoded — prod serves from `/japan-2026/`, dev from `/`), `devOptions.enabled: false`.
+- [ ] [Opus] Write `scripts/generate-pwa-icons.mjs` per ARCHITECTURE §14e and run it once: `pwa-192.png`, `pwa-512.png`, `pwa-maskable-512.png` (torii at ~60%, everything inside the central 80% safe zone), `apple-touch-icon.png` (180², opaque, square). Commit the four PNGs. The clay/paper hexes in the script + manifest carry the DESIGN §12a exception comment.
+- [ ] [Opus] iOS meta set in `index.html` per ARCHITECTURE §14c (`apple-mobile-web-app-*`, `mobile-web-app-capable`, `apple-touch-icon` link).
+- [ ] [Opus] Workbox runtime caching exactly per the ARCHITECTURE §14f table: NetworkOnly `auth/v1`, NetworkFirst (4s timeout) `rest/v1`, CacheFirst + `ignoreSearch` `storage/v1/object`, CacheFirst CARTO tiles, **nothing** for Open-Meteo. No background-sync, no mutation queue (ARCHITECTURE §4's note stands).
+- [ ] [Opus] `useOnline.ts` + `OfflineBanner` (DESIGN §12b); `UpdateToast` on `useRegisterSW`'s `needRefresh` (DESIGN §12c) — refresh only on tap, dismiss defers.
+
+**Acceptance:** `npm run typecheck && npm run build` clean and `dist/` contains `sw.js`, `manifest.webmanifest` and the icon set with `/japan-2026/`-prefixed URLs when built with `VITE_BASE=/japan-2026/`. On the deployed site: Chrome DevTools → Application shows the manifest valid + SW activated; Lighthouse reports installable. On a real iPhone: Share → Add to Home Screen yields the torii icon, opening it shows **no Safari chrome**, then flight-mode relaunch still opens the app with the last-loaded itinerary and the offline banner showing. Deploy a trivial change while the app is open → the refresh toast appears and only refreshes on tap. `npm run dev` behaviour unchanged (no SW in dev).
+
+## Phase 8 — Today view + weather card [Opus]
+
+Two small, independent smartenings of the itinerary tab; no new tables.
+
+- [ ] [Opus] `data/tripWindow.ts` with `tripDayFor()` exactly per DATA_MODEL §14 (device-local, local-midnight maths, null outside the window); `ItineraryPage` initialises `activeDay` from it — once per mount, manual pill taps always win afterwards (ARCHITECTURE §15).
+- [ ] [Opus] Now/next slot marker + one-shot centre-scroll per ARCHITECTURE §15 + DESIGN §13 (parse rule `/^(\d{1,2}):(\d{2})/`, unparseable labels skipped, no ticking timer, reduced-motion = instant jump); today's day pill gets its clay dot (DESIGN §13.1).
+- [ ] [Opus] `lib/weather.ts` per API §8 — plain `fetch`, **no key, no env var, no supabase import anywhere in the module**; `useWeather.ts` with the DATA_MODEL §13c cache discipline (30 min fresh, 6 h stale ceiling, `japan2026WeatherCache`); `WeatherCard` per DESIGN §16 rendered between `DayHeader` and the slot list, hidden for `Home`, WMO mapping from DATA_MODEL §13b.
+
+**Acceptance:** with the system clock set inside the trip window (e.g. 23 Sep 2026 14:00), opening the Itinerary tab lands on Day 4 with the ~14:00 slot centred and marked NOW, and the weather card reads `FUJI · …`; clock at 07:00 before the first parseable slot shows NEXT; clock outside the window lands on Day 1 with no marker, and the card falls back to `… · RIGHT NOW` (dates beyond the 7-day horizon). Kill the network: cached weather shows "as of HH:MM"; clear the cache + kill the network: no card, no error, no console noise. `grep -ri "api.key\|apikey" apps/web/src` finds nothing weather-related; switching days switches city correctly for all five legs.
+
+## Phase 9 — Visited marks [Opus]
+
+Prereq (one-time, dashboard): apply API §5a — table, RLS (no UPDATE policy), publication, replica identity. The migration file is Phase 12 paperwork.
+
+- [ ] [Opus] `data/itemKey.ts` per DATA_MODEL §10a: `itemSlug` (NFKC, `\p{L}\p{N}`, the exact regex), `itemKeyForIdea`, `itemKeyForEntry` (submissions → `spot:{submissionKey}`, curated → kind-prefixed city/suburb/name — **never the index-suffixed normalized id**).
+- [ ] [Opus] `useVisited.ts` per API §5b + ARCHITECTURE §16: load set → optimistic toggle (idempotent upsert / delete) → `japan2026VisitedMarks` snapshot → realtime add/drop → open-mode localStorage store. Provided once from `App.tsx`.
+- [ ] [Opus] `VisitedToggle` in `PlaceCard` + the visited card state per DESIGN §14, wired on Ideas, Restaurants, Attractions, Animal cafés and Full data; not on accommodations/events, not on map popups.
+
+**Acceptance:** two signed-in browsers — ticking a café in one dims it and adds the "Visited" pill in the other within a second, in both that tab and Full data (same key, both surfaces); unticking reverses it (DELETE arrives keyed — proves replica identity). Toggle the same card in both browsers near-simultaneously: one row in the table, no errors. Reload: marks persist; flight-mode reload: marks render from the snapshot. Verify in SQL that a marked restaurant's `item_key` is `restaurant:{city}:{suburb}:{name}`-shaped with no trailing index.
+
+## Phase 10 — Packing checklist [Opus]
+
+Prereq (dashboard): apply API §6a–6b. Migration file in Phase 12.
+
+- [ ] [Opus] Types + `PACKING_CATEGORIES` + `data/packingSeed.ts` with the DATA_MODEL §11d seed **verbatim** (keys, categories, labels — generic by rule, no real names, no finances).
+- [ ] [Opus] `usePacking.ts` per API §6c — the `useItinerary` engine minus drag: load → seed-if-empty (race-proof upsert) → keyed Map → tick/edit-label/add/remove with optimistic writes + `japan2026PackingItems` snapshot + realtime + open-mode fallback. No dnd-kit wiring (DATA_MODEL §11e — `position` schema-ready, UI deliberately omitted).
+- [ ] [Opus] `PackingPage` per DESIGN §15 (category kickers, counts, checkbox rows, no strikethrough, per-category add, ✕ + undo, sync whisper); `tabs.ts` gains `'packing'` + the `PLAN_TABS` group; mobile Plan becomes a group with the segmented control (Itinerary · Packing for now — it grows in Phases 11–12), `lastPlanTab` in `App.tsx` per ARCHITECTURE §13b. Desktop tab row gains Packing.
+
+**Acceptance:** two browsers — tick, re-label, add and delete items in one and watch each apply in the other within a second, in the right category; first-load seeding from two racing tabs produces exactly one seed set (count = the §11d table's 24). Mobile viewport: the five nav items are unchanged, Plan opens last-used of Itinerary/Packing, the segmented control switches between them; every shipped view still reachable. Open mode: full checklist works from localStorage. Typecheck/build clean.
+
+## Phase 11 — Journal + Storage [Opus]
+
+Prereq (dashboard): apply API §7a–7d — table, RLS, publication, replica identity, **bucket + the four storage policies**. Verify per API §7d before writing client code. Migration file in Phase 12.
+
+- [ ] [Opus] `lib/images.ts` per DATA_MODEL §12d: `createImageBitmap` → canvas → `toBlob('image/jpeg', 0.8)`, longest edge ≤ 1600 px, never upscale. No compression library (ARCHITECTURE §3).
+- [ ] [Opus] `useJournal.ts` per API §7e + ARCHITECTURE §19: CRUD by `entry_key`, photo upload **only through the compressor**, `photo_path` update after upload, memoised signed URLs (1 h, never persisted), object-then-row delete, realtime, `japan2026JournalEntries` snapshot (text only), open mode text-only with photo UI hidden.
+- [ ] [Opus] `JournalPage` per DESIGN §18: composer (date defaults today, textarea, photo attach + preview, single clay button), newest-first entry cards with day-number kickers derived via `tripDayFor`, lazy photos with paper-deep placeholders, in-place edit, ✕ + undo, empty state, sync whisper. `tabs.ts` gains `'journal'`; Plan group + desktop row grow.
+
+**Acceptance:** two browsers — an entry written in one (with a phone-sized test photo ≥ 4 MB) appears in the other within a second, photo included after its signed-URL fetch; the uploaded object is JPEG with longest edge exactly ≤ 1600 px and typically < 500 KB (check in the dashboard). Unauthenticated `fetch` of the object URL path returns an error, and the REST probe on `journal_entries` returns zero rows. Edit and delete sync both ways; delete removes the object (dashboard shows it gone). DevTools-offline: composing saves text locally with the standard note, the photo button is disabled, previously viewed photos still render (SW cache). **No author information exists anywhere** — confirm the table has no user column and the UI no attribution surface.
+
+## Phase 12 — Reference tab + extension paperwork [Sonnet]
+
+Mechanical and fully specced — content is transcription, not judgement. **Do not touch any hook or sync logic in this phase.**
+
+- [ ] [Sonnet] `data/quickReference.ts` + `ReferencePage` per DATA_MODEL §15 (content **verbatim** — 110/119, the gov.uk link labelled "check before you go", the ten phrases, the etiquette list; no embassy phone number, no invented facts) and DESIGN §17 (emergency card with the large mono numbers, `jp` utility on every Japanese run, phrase table, plain list). `tabs.ts` gains `'reference'`; Plan group + desktop row reach their final four/eleven.
+- [ ] [Sonnet] Commit `supabase/migrations/0002_visited_marks.sql`, `0003_packing_items.sql`, `0004_journal.sql` — the exact SQL text of API §5a, §6a–6b, §7a–7d, header comments pointing at API.md.
+- [ ] [Sonnet] `README.md`: add the three new tabs, the installed-app note ("Add to Home Screen on iOS — it then works offline"), and the icon-regeneration one-liner (`node scripts/generate-pwa-icons.mjs`). `SUPABASE_SETUP.md`: add the three SQL steps (paste from the migrations) and a short "journal photos bucket" walkthrough incl. the §7d verification. Same friendly voice; **no real names; never name or hint at the 22 Sep venue.**
+
+**Acceptance:** fresh clone → `npm install` → `npm run dev` → the Reference tab renders completely in open mode (it is static — no Supabase required); phrases render in Noto Sans JP; the emergency numbers are 110/119 and the only external link is gov.uk. `git log -p` for this phase shows no edits to `hooks/` or `lib/` beyond imports for the new tab; migrations diff-match API.md's SQL blocks exactly.
+
+## Phase 13 — Extension verification [Opus]
+
+- [ ] [Opus] Walk every extension acceptance list (ARCHITECTURE §13–19 behaviours, DATA_MODEL §10–15 shapes, API §5–8 patterns, DESIGN §11's extension items + §12–18, Phases 7–12 above) against the deployed site, both themes, mobile (375px) and desktop, recording real command output and observed behaviour — **run the code, not the report; subagent claims are not evidence.**
+- [ ] [Opus] Device drills on production: install on both household iPhones from Safari (standalone, torii icon); flight-mode relaunch on each shows itinerary + packing + journal text + last-viewed photos and map areas; a deploy while one phone is foregrounded raises the refresh toast on it.
+- [ ] [Opus] Realtime drill across all three new tables simultaneously (two browsers: a visit toggle, a packing tick and a journal entry inside the same minute — all three land on the other side, correctly keyed). RLS probes: unauthenticated REST reads of `visited_marks`, `packing_items`, `journal_entries` return zero rows; an unauthenticated storage object fetch errors.
+- [ ] [Opus] Regression sweep of every shipped behaviour (the Phase 6 list, re-run): all views reachable on desktop and mobile incl. the two segmented groups, map layers + fly-to, submit vocab, itinerary drag/edit/sync, day-3 discretion, dark mode, reduced motion, no console errors, Lighthouse a11y ≥ 95 now including Packing/Journal/Reference, zero hex literals outside `theme.css` + the DESIGN §12a exception files.
+
+**Acceptance:** every box above ticked with logged evidence, or recorded here as a deliberate follow-up; the household can land at Haneda with no signal and still see the plan, tick off the first konbini run, and write the first journal entry.
 
 ---
 

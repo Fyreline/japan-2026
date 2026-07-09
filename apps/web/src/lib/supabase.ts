@@ -12,9 +12,16 @@ const key = import.meta.env.VITE_SUPABASE_ANON_KEY
 export const supabase: SupabaseClient | null =
   url && key ? createClient(url, key) : null
 
-// One place for table names (API.md §0b); the old config.js SUPABASE_TABLE
-// indirection retires.
+// One place for table/bucket names (API.md §0b); the old config.js
+// SUPABASE_TABLE indirection retires.
 export const TABLES = {
   spots: 'submitted_spots',
   slots: 'itinerary_slots',
+  visited: 'visited_marks',
+  packing: 'packing_items',
+  journal: 'journal_entries',
+} as const
+
+export const BUCKETS = {
+  journalPhotos: 'journal-photos',
 } as const

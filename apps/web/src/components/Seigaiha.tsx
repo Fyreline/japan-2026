@@ -30,3 +30,22 @@ export function SeigaihaBand() {
     </div>
   )
 }
+
+/** A single large seigaiha scallop — the "quiet illustration" empty-state
+ * motif (DESIGN.md §8), reused by Journal's empty state and Reference's
+ * page foot. currentColor + opacity only, never animated. */
+export function SeigaihaScallop() {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 100 50"
+      className="mx-auto h-16 w-32 text-sky opacity-20 dark:opacity-25"
+    >
+      <g fill="none" stroke="currentColor" strokeWidth="2.5">
+        <path d="M0 50 A50 50 0 0 1 100 50" />
+        <path d="M15 50 A35 35 0 0 1 85 50" />
+        <path d="M30 50 A20 20 0 0 1 70 50" />
+      </g>
+    </svg>
+  )
+}

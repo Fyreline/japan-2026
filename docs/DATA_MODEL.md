@@ -1,8 +1,8 @@
 # Japan 2026 — Data Model
 
-Every data shape in the app: the static in-repo datasets (as TypeScript types), the two Supabase tables (TS shape + Postgres schema + the mapping between them), the localStorage keys, and the itinerary seed rules. Where the app and this file diverge, this file wins and the code is corrected. Companion docs: [API.md](API.md) for the SQL + call patterns, [ARCHITECTURE.md](ARCHITECTURE.md) §6–7 for how these shapes move.
+Every data shape in the app: the static in-repo datasets (as TypeScript types), the Supabase tables (TS shape + Postgres schema + the mapping between them), the journal photo storage contract, the localStorage keys, and the seed rules. Where the app and this file diverge, this file wins and the code is corrected. Companion docs: [API.md](API.md) for the SQL + call patterns, [ARCHITECTURE.md](ARCHITECTURE.md) §6–7 and §13–19 for how these shapes move.
 
-**Status: planned.** Shapes marked *existing* are verified against the current `index.html` and JSON files; shapes marked *new* are the redesign's additions. All types live in `apps/web/src/data/types.ts`.
+**Status:** §1–§9 are shipped and live (the rebuild, [PLAN.md](PLAN.md) Phases 1–6). §10–§15 are the **feature extension** (*new*) — specced here first, implemented in Phases 7–13. All types live in `apps/web/src/data/types.ts` unless a section names another module.
 
 ---
 
@@ -262,7 +262,347 @@ This is the reference implementation the itinerary sync (§6) deliberately mirro
 | `japan2026UserSubmissions` (*existing*) | JSON array of submission entries | Own submissions — open mode (it *is* the store) or alongside Supabase (local copy) |
 | `japan2026ItinerarySlots` (*new*) | JSON array of client-shape slots (§6b), whole trip | Open mode: on every mutation. Signed-in: write-through snapshot after every successful load/mutation — the offline read cache |
 | `japan-theme` (*new*) | `'light'` or `'dark'` (absent = follow OS) | Theme toggle |
+| `japan2026VisitedMarks` (*extension*) | JSON array of visited `item_key` strings (§10) | Same discipline as the slots snapshot: open mode it is the store; signed-in it is the write-through offline cache |
+| `japan2026PackingItems` (*extension*) | JSON array of client-shape packing items (§11) | Same discipline as the slots snapshot |
+| `japan2026JournalEntries` (*extension*) | JSON array of client-shape journal entries (§12) — **text and paths only, never photo binaries** | Same discipline; photo bytes live only in Storage (§12d) and the service worker's runtime cache |
+| `japan2026WeatherCache` (*extension*) | Per-city last Open-Meteo snapshot + `fetchedAt` (§13c) | Every successful weather fetch |
 
 ## 9. Sizing sanity
 
 14 days × ~7 slots ≈ 100 seed rows; a heavily edited trip might double that. `submitted_spots` holds dozens of rows. Everything fits in Supabase's free tier by three orders of magnitude; no pagination anywhere; whole-table reads on load are the right call. The bundled JSON datasets total ~55 KB pre-gzip — a non-issue for a Vite chunk.
+
+The extension changes none of this: `visited_marks` tops out at a few hundred one-column rows, `packing_items` at ~40, `journal_entries` at a few dozen. Journal photos are the only new bulk — at the §12d compression contract (~150–400 KB each, ≤ 30 photos) the whole trip is well under 15 MB against Storage's 1 GB free tier. Whole-table reads stay the right call everywhere.
+
+## 10. Visited marks (*extension*) — "we've been here"
+
+A shared, presence-only set: an item is visited if its key has a row in `visited_marks`, and not visited otherwise. No payload, no notes, no attribution — the toggle on a card is the entire feature. Synced live between the two phones exactly like everything else.
+
+### 10a. Item keys — the canonicalisation function (`data/itemKey.ts`)
+
+The existing datasets do **not** share a durable id scheme, so the mark cannot key on raw `id`s:
+
+| Dataset | Current id | Durable? |
+|---|---|---|
+| Ideas (`ideas.ts`) | authored kebab-case (`'gotokuji'`, `'cw-…'`) | **Yes** — hand-written, never regenerated |
+| Restaurants (`normalize.ts`) | `{slug(city)}-{slug(suburb)}-{index}` | **No** — the index shifts when the JSON is edited |
+| Attractions / animal cafés | `{slug(city)}-{slug(name)}-{index}` | **No** — same index problem |
+| Submitted spots | `client_submission_key ?? String(row.id)` | **Yes** — the permanent sync handle (§7) |
+| Accommodations / events | authored ids | Excluded — you don't tick off your own hotel; no toggle on these cards |
+
+So `visited_marks.item_key` uses a canonical key derived from stable natural facts, computed by one function pair in a new `apps/web/src/data/itemKey.ts`:
+
+```ts
+/** Deterministic, index-free slug. NFKC first so width/compat variants of the
+ *  same Japanese string collapse; \p{L}\p{N} keeps CJK intact. */
+export function itemSlug(s: string): string {
+  return s
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+export function itemKeyForIdea(idea: TripIdea): string {
+  return `idea:${idea.id}`                      // authored ids are already stable
+}
+
+const KIND_PREFIX: Record<PlaceType, string> = {
+  Restaurant: 'restaurant',
+  Attraction: 'attraction',
+  'Animal Cafe': 'cafe',
+}
+
+export function itemKeyForEntry(e: PlaceEntry): string {
+  if (e.submissionKey) return `spot:${e.submissionKey}`   // submissions: the permanent handle
+  return `${KIND_PREFIX[e.type]}:${itemSlug(e.city)}:${itemSlug(e.suburb)}:${itemSlug(e.name)}`
+}
+```
+
+Stability contract (documented, accepted trade-offs for a two-person app):
+
+- Keys survive JSON reordering, re-indexing, and description/link edits — the failure mode of the raw ids.
+- **Renaming** a curated place in a JSON file orphans its mark (the card reads as unvisited again). Accepted: renames are rare, the cost is one lost tick, and orphan rows are harmless (cleanup recipe in DEPLOYMENT-style housekeeping, API.md §5).
+- Two same-named places in the same city + suburb would share a key and toggle together. No such pair exists in the current data; accepted.
+- `itemSlug` is the **only** slugger for keys — never reuse `normalize.ts`'s display `slug()` here, and never change `itemSlug` once marks exist (it is as frozen as `slot_key`).
+
+### 10b. Client shape
+
+```ts
+// The whole client state is a set — presence = visited.
+type VisitedSet = Set<string>       // of item_key
+```
+
+No richer object exists client-side. The hook (`hooks/useVisited.ts`) exposes `isVisited(key)`, `toggle(key)` and mirrors the `useItinerary` engine shape (ARCHITECTURE.md §16).
+
+### 10c. Supabase table `visited_marks`
+
+Full SQL in [API.md](API.md) §5. Columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `bigint generated always as identity primary key` | surrogate; never a client handle |
+| `item_key` | `text not null unique` | §10a canonical key — the dedup + delete handle |
+| `created_at` | `timestamptz not null default now()` | |
+
+No `updated_at` and no UPDATE path — rows are only ever inserted and deleted (presence-only). `REPLICA IDENTITY FULL` so realtime DELETEs carry `item_key` (same reasoning as §6d).
+
+### 10d. Toggle protocol
+
+- **Mark:** `upsert({ item_key }, { onConflict: 'item_key', ignoreDuplicates: true })` — both phones marking the same card in the same second produce one row and zero errors (the §6f seeding trick, reused).
+- **Unmark:** `delete().eq('item_key', key)`.
+- **Realtime:** event `*`; INSERT adds the key to the set, DELETE drops it. Own echoes are no-ops.
+- Optimistic local flip first, localStorage snapshot after every change, quiet inline failure note — the standard mutation discipline (§8, ARCHITECTURE.md §8).
+
+## 11. Packing items (*extension*) — the shared checklist
+
+A new tab and a new fully-CRUD table, deliberately shaped as a **simpler sibling of the itinerary engine** (§6): same stable-key + fractional-position machinery, minus times, types and colour edges.
+
+### 11a. Client shape
+
+```ts
+export type PackingCategory =
+  | 'documents' | 'electronics' | 'clothing' | 'health' | 'other'
+
+export const PACKING_CATEGORIES: { id: PackingCategory; label: string }[] = [
+  { id: 'documents',   label: 'Documents' },
+  { id: 'electronics', label: 'Electronics' },
+  { id: 'clothing',    label: 'Clothing' },
+  { id: 'health',      label: 'Health & first aid' },
+  { id: 'other',       label: 'Everything else' },
+]
+
+export interface PackingItem {
+  itemKey: string           // 'pk-…' stable sync handle (mirrors slot_key)
+  category: PackingCategory
+  label: string             // the editable text
+  checked: boolean
+  position: number          // fractional sort key within the category (§6c rules)
+}
+```
+
+### 11b. Supabase table `packing_items`
+
+Full SQL in [API.md](API.md) §6. Columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `bigint generated always as identity primary key` | |
+| `item_key` | `text not null unique` | seeded `pk-{category}-{slug}`, user-added `pk-user-{epoch}-{slug}` |
+| `category` | `text not null default 'other'` + `check (category in ('documents','electronics','clothing','health','other'))` | |
+| `label` | `text not null default ''` | |
+| `checked` | `boolean not null default false` | |
+| `position` | `double precision not null` | §6c fractional ordering, per category |
+| `created_at` / `updated_at` | `timestamptz` | `updated_at` via the same `moddatetime` trigger pattern as §6d |
+
+Index `(category, "position")` for the ordered read; `REPLICA IDENTITY FULL` for keyed DELETEs.
+
+### 11c. Mapping — `rowToPackingItem` / `packingItemToRow`
+
+| Client | Row | Direction notes |
+|---|---|---|
+| `itemKey` | `item_key` | both ways; never regenerated |
+| `category` | `category` | both ways; unknown values fall back to `'other'` on read |
+| `label` | `label` | both ways; `row.label ?? ''` on read |
+| `checked` | `checked` | both ways; `Boolean(row.checked)` on read |
+| `position` | `position` | both ways; `Number(row.position)` on read |
+| — | `id`, `created_at`, `updated_at` | server-only |
+
+### 11d. Seed — `PACKING_SEED` (`data/packingSeed.ts`)
+
+Seeded on first signed-in load if the table is empty, with the exact §6f protocol (`onConflict: 'item_key', ignoreDuplicates: true` — race-proof). Open mode seeds localStorage the same way. Positions on the 10/20/30… lattice per category. The seed is generic by rule: **no real names, no finances, no venue hints.**
+
+| `item_key` | category | label |
+|---|---|---|
+| `pk-documents-passports` | documents | Passports |
+| `pk-documents-idp` | documents | International Driving Permit (Fuji car leg) |
+| `pk-documents-insurance` | documents | Travel + driving insurance details |
+| `pk-documents-esim` | documents | eSIM installed and tested |
+| `pk-documents-flights` | documents | Flight details saved offline |
+| `pk-documents-bookings` | documents | Hotel booking confirmations |
+| `pk-electronics-adapters` | electronics | Plug adapters (Japan type A) |
+| `pk-electronics-chargers` | electronics | Phone chargers + cables |
+| `pk-electronics-battery` | electronics | Battery pack, charged |
+| `pk-electronics-camera` | electronics | Camera + spare card |
+| `pk-electronics-earphones` | electronics | Earphones |
+| `pk-clothing-layers` | clothing | Light layers — warm days, cool evenings |
+| `pk-clothing-shoes` | clothing | Comfortable walking shoes, broken in |
+| `pk-clothing-rain` | clothing | Rain jacket or compact umbrella |
+| `pk-clothing-onsen` | clothing | Small towel for onsen/sento |
+| `pk-clothing-laundry` | clothing | Laundry bag (coin laundries are everywhere) |
+| `pk-health-medication` | health | Regular medication, in original packaging |
+| `pk-health-firstaid` | health | Paracetamol + plasters + basics |
+| `pk-health-sanitiser` | health | Hand sanitiser (many toilets lack soap) |
+| `pk-other-coinpurse` | other | Coin purse — ¥ coins pile up fast |
+| `pk-other-totebag` | other | Foldable tote for shopping + konbini runs |
+| `pk-other-pen` | other | Pen for immigration forms |
+| `pk-other-daybag` | other | Day bag |
+| `pk-other-rubbishbag` | other | Small bag for daytime rubbish (public bins are rare) |
+
+### 11e. Decisions
+
+- **Reorder is schema-ready but not in the v1 UI.** `position` ships from day one (items render `ORDER BY category, position`; new items append at their category's end), so drag-reorder can be added later with zero migration — but the checklist gets no dnd-kit wiring at first. A packing list is check-and-move-on, not a choreography surface; the itinerary keeps the drag budget. Revisit only if the household asks.
+- Full CRUD (like slots): edit label in place, add per category, delete with undo. Conflict policy: last write wins, per item (§6 precedent).
+
+## 12. Journal entries (*extension*) — the shared trip diary
+
+One table plus the app's **first use of Supabase Storage** (photos). Chronological notes, optionally one photo each, shared and **unattributed** — per the household convention (ARCHITECTURE.md §4.4), nothing stores or exposes which of the two wrote an entry.
+
+### 12a. Client shape
+
+```ts
+export interface JournalEntry {
+  entryKey: string          // 'jr-{epochms}-{rand4}' — stable sync handle
+  date: string              // ISO 'YYYY-MM-DD' — the day the entry describes
+  text: string
+  photoPath: string | null  // Storage object path in journal-photos, e.g. 'jr-1758…-4821.jpg'
+}
+```
+
+The trip day number (`DAY 3`) is **derived** client-side from `date` via §14's window maths when the date falls inside the trip — never stored. `created_at` is server-only and breaks ties within a date.
+
+### 12b. Supabase table `journal_entries`
+
+Full SQL in [API.md](API.md) §7. Columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `bigint generated always as identity primary key` | |
+| `entry_key` | `text not null unique` | sync handle, client-generated |
+| `entry_date` | `date not null` | the day described; the client always sends it |
+| `body` | `text not null default ''` | |
+| `photo_path` | `text` | `null` = no photo; §12d path convention |
+| `created_at` / `updated_at` | `timestamptz` | `updated_at` via the `moddatetime` trigger pattern |
+
+Index `(entry_date, created_at)`; `REPLICA IDENTITY FULL`. **No author column, ever.**
+
+### 12c. Mapping — `rowToJournalEntry` / `journalEntryToRow`
+
+| Client | Row | Direction notes |
+|---|---|---|
+| `entryKey` | `entry_key` | both ways; never regenerated |
+| `date` | `entry_date` | both ways; Postgres `date` ↔ the ISO string verbatim |
+| `text` | `body` | both ways; `row.body ?? ''` on read |
+| `photoPath` | `photo_path` | both ways; `row.photo_path ?? null` on read |
+| — | `id`, `created_at`, `updated_at` | server-only |
+
+### 12d. Photos — the compression + storage contract
+
+- Bucket: `journal-photos`, **private**, authenticated-only policies (API.md §7c–7d). Object path = `` `${entryKey}.jpg` `` — one photo max per entry; re-attaching overwrites (`upsert: true`).
+- **Client-side compression is a requirement, not a nice-to-have** (mobile data in Japan): before upload, decode with `createImageBitmap(file)` (which honours EXIF orientation), draw onto a canvas scaled so the **longest edge ≤ 1600 px** (never upscale), export `canvas.toBlob('image/jpeg', 0.8)`. A 12 MP phone photo lands around 150–400 KB. Lives in a new `apps/web/src/lib/images.ts`; no library — the canvas API is the whole implementation (ARCHITECTURE.md §3 justification).
+- Reads go through **signed URLs** (private bucket): `createSignedUrl(path, 3600)`, memoised per session. URLs are never persisted (they expire); only `photo_path` is stored.
+- Deleting an entry removes the object first, then the row. A failed object delete leaves an orphan — harmless; housekeeping recipe in API.md §7e.
+- **Open mode:** Storage needs Supabase, so the photo control is hidden; journal entries are text-only in localStorage. Signed-in offline: text saves locally with the standard sync note; photo attach is disabled while offline (no upload queue — ARCHITECTURE.md §4.5 stands).
+
+### 12e. Decisions
+
+- **No one-entry-per-day constraint.** The composer defaults to today's date and the list groups by date, which nudges towards one entry a day — but a museum morning and an izakaya evening deserve separate photos, so there is no unique index on `entry_date`.
+- **Newest first.** `ORDER BY entry_date DESC, created_at DESC` — mid-trip, today's entry is the one being reread and edited.
+- Either traveller can edit or delete any entry — same trust model as slots; last write wins.
+
+## 13. Weather (*extension*) — client-only, no table
+
+Open-Meteo is fetched straight from the browser; nothing touches Supabase. Shapes live in `types.ts`, the fetch/cache logic in `hooks/useWeather.ts` (call pattern: [API.md](API.md) §8).
+
+### 13a. City anchors
+
+The weather coordinate for a day is `CITY_FALLBACK_COORDS[day.leg]` — for every leg except `'Home'`, `Leg` *is* a `City`, and these are the **same five anchors** `normalize.ts` already ships for submission fallbacks (Tokyo 35.6762/139.6503 · Fuji 35.505/138.77 · Hiroshima 34.3853/132.4553 · Osaka 34.6937/135.5023 · Kyoto 35.0116/135.7681). No new coordinates are authored. `leg === 'Home'` → no weather (the card does not render for day 14).
+
+### 13b. Snapshot shape + WMO code mapping
+
+```ts
+export interface WeatherSnapshot {
+  city: City
+  fetchedAt: number                       // Date.now() at fetch
+  current: { temp: number; code: number } // temperature_2m °C, weather_code
+  daily: {
+    date: string                          // 'YYYY-MM-DD'
+    code: number
+    tMax: number
+    tMin: number
+    rainChance: number                    // precipitation_probability_max, %
+  }[]
+}
+```
+
+WMO `weather_code` → display, one lookup table (`WEATHER_LABELS`), unknown codes fall back to `'—'` with no emoji:
+
+| Codes | Label | Emoji |
+|---|---|---|
+| 0 | Clear | ☀️ |
+| 1–2 | Mostly clear | 🌤️ |
+| 3 | Overcast | ☁️ |
+| 45, 48 | Fog | 🌫️ |
+| 51–57 | Drizzle | 🌦️ |
+| 61–67 | Rain | 🌧️ |
+| 71–77, 85–86 | Snow | 🌨️ |
+| 80–82 | Showers | 🌦️ |
+| 95–99 | Thunderstorm | ⛈️ |
+
+### 13c. Cache — `japan2026WeatherCache`
+
+`Record<City, WeatherSnapshot>` in localStorage. Rules: a snapshot **younger than 30 min** is served without fetching (also the politeness cap on a free keyless API); older → refetch, showing the stale copy meanwhile; fetch fails and the copy is **under 6 h** old → keep showing it (mono "as of HH:MM" line); over 6 h with no network → the card hides. Weather is never louder than absence — no error states, no toasts.
+
+## 14. Trip window & the Today calculation (*extension*)
+
+`ItineraryDay.date` stays a display string (`'Sun 20 Sep'`) and is **never parsed**. Real-date logic gets its own constants in a new `apps/web/src/data/tripWindow.ts`:
+
+```ts
+export const TRIP_DAY_COUNT = 14
+
+/** Day number (1–14) for a real date, or null outside the trip window.
+ *  Day 1 = Sun 20 Sep 2026. Local-midnight construction + Math.round makes
+ *  the maths immune to DST-length days. */
+export function tripDayFor(now: Date): number | null {
+  const start = new Date(2026, 8, 20)   // local midnight, 20 Sep 2026
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const n = Math.round((today.getTime() - start.getTime()) / 86_400_000) + 1
+  return n >= 1 && n <= TRIP_DAY_COUNT ? n : null
+}
+```
+
+- **Timezone: deliberately device-local.** The trip runs on JST and both phones will be on JST from landing, so local time is correct exactly when it matters. Before departure the window check simply returns null (even the 19 Sep overnight flight: device still says 19 Sep → null → Day 1 default, which is right). No `Intl` timezone juggling, no library.
+- **Outside the window the itinerary defaults to Day 1**, exactly as shipped. (Nearest-upcoming-day was considered and rejected: outside the window the travellers are at home planning from the top, and the extra rule buys nothing.)
+- **Current-slot highlight** (ARCHITECTURE.md §15): slot `time` labels are free text, so parse with `/^(\d{1,2}):(\d{2})/` and ignore slots that don't match. The *current* slot is the last parseable slot with time ≤ device now; if none yet (early morning), the first parseable slot is *next*. Recomputed on mount and day-switch only — no ticking timer.
+
+## 15. Quick-reference content (*extension*) — static dataset
+
+Entirely in-repo, no storage of any kind: a new `apps/web/src/data/quickReference.ts` renders through the Reference tab (DESIGN.md §17). Content rules: practical and calm, British English, no tourist-board prose. The **full canonical content** is specced here so implementation is transcription, not judgement:
+
+### 15a. Emergency
+
+| Entry | Value |
+|---|---|
+| Police | **110** |
+| Fire / ambulance | **119** |
+| Both work from any phone, SIM or not. | note line |
+| UK government travel advice (incl. embassy contact) | link out: `https://www.gov.uk/foreign-travel-advice/japan` — labelled "check before you go" |
+
+Deliberate: **no embassy phone number is hardcoded** — it cannot be verified as current from here, and a wrong emergency number is worse than a link. The gov.uk page is the stable, maintained source.
+
+### 15b. Phrases (`{ jp, romaji, en }[]` — `jp` rendered with the `jp` font utility)
+
+| 日本語 | Rōmaji | English |
+|---|---|---|
+| ありがとうございます | arigatou gozaimasu | Thank you |
+| すみません | sumimasen | Excuse me / sorry (also calls staff over) |
+| お願いします | onegai shimasu | Please |
+| 英語が話せますか？ | eigo ga hanasemasu ka? | Do you speak English? |
+| トイレはどこですか？ | toire wa doko desu ka? | Where is the toilet? |
+| これはいくらですか？ | kore wa ikura desu ka? | How much is this? |
+| これをください | kore o kudasai | This one, please |
+| 大丈夫です | daijoubu desu | I'm fine / no thank you |
+| 美味しかったです | oishikatta desu | That was delicious |
+| 乾杯 | kanpai | Cheers |
+
+### 15c. Etiquette & practicalities (rendered as a plain list)
+
+- No tipping, anywhere — it can genuinely confuse. Great service is the default.
+- Shoes off where you see a genkan step or shoe lockers — restaurants, ryokan, temples, fitting rooms.
+- Don't eat while walking; stand aside or find a spot. Drinking from a bottle by the vending machine is fine.
+- Trains are quiet: phones on silent, calls wait until you're off.
+- Public bins are rare — carry your rubbish home (see the packing list).
+- Cash still rules small places; top up IC cards (Suica) at machines with cash. 7-Eleven ATMs take UK cards.
+- Stand left on escalators in Tokyo, right in Osaka. You'll be corrected by the crowd either way.
+- Onsen: wash and rinse thoroughly *before* the bath; towels stay out of the water; tattoo rules vary — check signs.
+- Queue like it's a national sport, because it is: marked lines on platforms, orderly everywhere.
+- Convenience stores (konbini) solve most problems: food, coffee, ATMs, toilets, parcel post.
