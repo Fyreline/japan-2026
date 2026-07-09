@@ -1,0 +1,14 @@
+# Core web layer — docs/ARCHITECTURE.md §20a. Stateless: no database, no
+# ORM, no migrations. Exactly two routes.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+httpx>=0.27
+pydantic-settings>=2.2
+
+# The Supabase Admin API mint (docs/API.md §9a) — the only place the
+# service_role key is ever used.
+supabase>=2.4
+
+# --- Dev / test ---
+pytest>=8.0
+respx>=0.21

@@ -5,8 +5,10 @@ animal cafés, a packing checklist, a shared trip journal and a submit-a-spot fo
 20 Sep – 3 Oct 2026: Tokyo → Fuji → Hiroshima → Osaka → Kyoto → home.
 
 A React + Vite + TypeScript + Tailwind SPA, wearing the same "Aizome" indigo-and-crimson
-look as our other two household apps. It talks straight to Supabase (no server of ours) —
-so it's just a static site with a login gate and a handful of live-syncing tables. It's
+look as our other two household apps. It talks straight to Supabase — so it's a static
+site with a login gate and a handful of live-syncing tables. The one small exception is
+a tiny sign-in helper (see "One login for all three apps" below) that lets it share a
+login with the other two apps; it's only involved at the moment you sign in. It's
 also an installable app: **Add to Home Screen on iOS** and it works offline, showing
 the last-synced plan with no signal.
 
@@ -54,6 +56,41 @@ npm run typecheck   # must stay clean
 npm run build        # must stay clean
 ```
 
+## One login for all three apps
+
+You sign in here with the **same email and password as the other two household apps** —
+one login, shared everywhere, and a password change made in the movie app applies here
+automatically, with nothing to update on this side.
+
+The way it works: a small helper server (`apps/server`) checks your password with the
+movie app's login, then hands this site a normal Supabase session and steps out of the
+way. It's only involved for the second or two it takes to sign you in — once you're in,
+the app talks to Supabase directly, exactly as before, even if the home machine is off.
+So if you ever see "Mishka Hub isn't reachable" on the sign-in screen, the app hasn't
+broken: your phone just can't reach home *right now*, and anyone already signed in is
+completely unaffected (full detail: `docs/AUTH.md` and `docs/ARCHITECTURE.md` §20).
+
+To run the helper locally for development:
+
+```bash
+cd apps/server
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env    # then fill in the real values — see below
+.venv/bin/uvicorn app.main:app --port 8103
+```
+
+Its `.env` (gitignored — never commit it) needs four values: `MISHKA_BASE_URL` (where the
+movie app's API lives, normally `http://127.0.0.1:8000`), `SUPABASE_URL` and
+`SUPABASE_ANON_KEY` (the same two public values the web app uses), and
+`SUPABASE_SERVICE_ROLE_KEY` — the one genuinely secret value, from the Supabase
+dashboard. That last key must never leave the `.env` file: not in git, not in the web
+app, not in a screenshot. Point the web app at your local helper by adding
+`VITE_AUTH_API_BASE=http://127.0.0.1:8103` to `apps/web/.env.local`.
+
+In production nothing needs starting by hand: the helper runs on the household machine
+as a LaunchAgent (port 8102) behind our Cloudflare Tunnel at
+`japan-api.mishka-hub.com`, and the live site uses it automatically.
+
 ## Repo layout
 
 ```
@@ -70,6 +107,8 @@ apps/web/              # the app — everything above lives here
     lib/                 # Supabase client, weather fetch, journal photo compression
   scripts/               # generate-pwa-icons.mjs (see below)
   public/                # app icons, manifest assets
+apps/server/            # the sign-in helper — checks your password with the movie
+                        #   app, hands back a Supabase session (docs/AUTH.md)
 supabase/migrations/    # the SQL behind every Supabase table + the journal photo
                         #   bucket, for the record
 docs/                   # the build spec — architecture, data model, API, design, deployment
@@ -117,6 +156,8 @@ applies once, to an empty table.
 - `OfflineExample.html` — a third party's reference site containing their own Supabase keys.
 - `Japan Itinerary/` — a spreadsheet export with finances, flight logistics, and the 22nd.
 - `apps/web/.env.local` — your local Supabase credentials.
+- `apps/server/.env` — the sign-in helper's credentials, including the service-role key
+  (the one real secret in the whole setup — it never goes anywhere but this file).
 - `node_modules/`, `apps/web/dist/`, `.DS_Store`, `.claude/`.
 
 Everything else in the repo — including the itinerary seed text and the curated

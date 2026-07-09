@@ -2,7 +2,7 @@
 
 This document is the durable reference for how the rebuilt Japan 2026 trip site fits together: the stack, the repo layout, component responsibilities, the Supabase auth gate, how itinerary edits travel between the two travellers' phones, failure modes, and how the whole thing deploys. Every other doc in this suite assumes the decisions recorded here. For the delivery order see [PLAN.md](PLAN.md); for storage shapes see [DATA_MODEL.md](DATA_MODEL.md); for the Supabase surface see [API.md](API.md); for the visual contract see [DESIGN.md](DESIGN.md); for ops see [DEPLOYMENT.md](DEPLOYMENT.md).
 
-**Status:** §1–§12 describe the **shipped rebuild**, live at `https://fyreline.github.io/japan-2026/` — a **React + Vite + TypeScript + Tailwind v4** SPA in the exact stack of the two sibling household apps (MishkaHub, Michi), wearing the shared Aizome palette, with a fully editable, live-syncing itinerary. §13–§19 specify the **feature extension** (PWA/offline, Today view, visited marks, packing, weather, quick reference, journal — [PLAN.md](PLAN.md) Phases 7–13): strictly additive, nothing shipped changes behaviour.
+**Status:** §1–§12 describe the **shipped rebuild**, live at `https://fyreline.github.io/japan-2026/` — a **React + Vite + TypeScript + Tailwind v4** SPA in the exact stack of the two sibling household apps (MishkaHub, Michi), wearing the shared Aizome palette, with a fully editable, live-syncing itinerary. §13–§19 specify the **feature extension** (PWA/offline, Today view, visited marks, packing, weather, quick reference, journal — [PLAN.md](PLAN.md) Phases 7–13): strictly additive, nothing shipped changes behaviour. §20 specifies the **shared-login extension** ([PLAN.md](PLAN.md) Phase 14, design in [AUTH.md](AUTH.md)): sign-in borrows Mishka Hub's credentials via a tiny identity-proxy backend — the one deliberate, narrow revision to non-goal 1, argued in §4.
 
 ---
 
@@ -17,8 +17,9 @@ A private, two-user trip dashboard for a 14-day Japan holiday (20 Sep – 3 Oct 
 | Map | `leaflet` (npm) + CARTO light tiles | bundled / basemaps.cartocdn.com | Map tab with 5 toggleable pin layers |
 | Drag-and-drop | `@dnd-kit/core` + `@dnd-kit/sortable` | bundled | Itinerary time-slot reordering (touch + keyboard) |
 | Installability / offline | `vite-plugin-pwa` (Workbox) service worker + web manifest | generated into the Pages build (§14) | Home-screen install, app-shell precache, read-cache for Supabase GETs, update prompt |
+| Login proxy (§20) | FastAPI (Python) — `apps/server`, stateless, **no database** | Household Mac: LaunchAgent, loopback port 8102, behind Cloudflare Tunnel `japan-api.mishka-hub.com` | The fresh sign-in moment only: verifies credentials against Mishka Hub, mints a genuine Supabase session, hands it to the SPA — then leaves the conversation |
 
-**There is no server of ours anywhere.** The browser talks straight to Supabase with the publishable anon key plus a signed-in session; row-level security is the entire authorisation model. This makes Japan the simplest of the three household apps: same frontend stack as MishkaHub/Michi, but **no FastAPI process, no Cloudflare Tunnel, no LaunchAgent** — nothing runs on the household Mac.
+**There is no server of ours in the data path, anywhere.** The browser talks straight to Supabase with the publishable anon key plus a signed-in session; row-level security is the entire authorisation model. The one exception (§20, the shared-login extension) is a tiny identity proxy that exists for the sign-in moment only: it verifies the submitted email/password against Mishka Hub, mints a genuine Supabase session, and hands it over — every read, write, realtime frame and token refresh afterwards is browser ↔ Supabase, exactly as above. Japan remains the simplest of the three household apps where it counts: **no data, sessions or sync of ours depend on the household Mac**, and once signed in, a phone has zero dependency on it (§20e).
 
 Runtime network dependencies:
 
@@ -27,6 +28,7 @@ Runtime network dependencies:
 | Supabase project | `*.supabase.co` | Auth, all five tables, realtime, journal photos (Storage) | Open mode / localStorage cache (§5, §7, §8) + service-worker read cache (§14) |
 | CARTO tile server | basemaps.cartocdn.com | Map tiles | Grey map, pins still plot (last-viewed tiles may serve from the SW cache, §14) |
 | Open-Meteo | api.open-meteo.com | Weather card on the itinerary (§18) — **keyless, no auth, the app's only third-party API call** | Cached snapshot (<6 h) or the card hides; nothing else affected |
+| Japan auth API (§20) | japan-api.mishka-hub.com | The fresh sign-in moment — **nothing else, ever** | Sign-in shows a friendly "can't reach home" line (§20c); **every already-signed-in session is untouched**, including fully offline — Supabase's own cloud handles refresh, not the Mac |
 
 Everything else — fonts (`@fontsource-variable/*`), Leaflet's JS/CSS, dnd-kit, the three curated JSON datasets — is bundled at build time. The current site's four CDN `<script>`/`<link>` tags (unpkg Leaflet, jsdelivr supabase-js + SortableJS, Google Fonts) all disappear.
 
@@ -133,7 +135,7 @@ export default defineConfig({
 
 Explicit decisions, not omissions. Revisiting any of them needs a written reason in this file first.
 
-1. **No backend of our own.** No Python/Node API, no Cloudflare Tunnel, no LaunchAgent, no port on the household Mac. Supabase (Postgres + Auth + Realtime behind RLS) is the entire backend, called directly from the SPA. This is what makes Japan structurally simpler than its siblings.
+1. **No backend of our own in the data path.** Supabase (Postgres + Auth + Realtime behind RLS) is the entire data backend, called directly from the SPA — no API of ours ever sits between the browser and the data. **The shared-login extension (§20) is the single, deliberately narrow exception**: a stateless identity proxy (FastAPI, LaunchAgent, Cloudflare Tunnel, port 8102 — [AUTH.md](AUTH.md)) whose one job is the fresh sign-in moment — verify the password against Mishka Hub, mint a genuine Supabase session, hand it over, done. Why this doesn't undermine the property that actually matters: what made Japan structurally simpler than its siblings was never "zero processes on the Mac" — it was that **nothing of Japan's depends on the household Mac**. That property survives intact. The proxy holds no database, no sessions, no state of any kind; after the one handoff, session persistence and refresh belong to Supabase's own cloud, so the Mac and tunnel can be down for a month and every signed-in phone keeps working — reads, writes, realtime, token refresh, and fully-offline PWA relaunches included (§20e). The Mac matters at exactly one moment: a fresh sign-in. Widening the exception beyond that one moment needs a written reason here first.
 2. **No client-side router.** Eight views switch on React state (`activeTab`), exactly like the siblings' tab shells. Deep links are not a requirement for a two-person app.
 3. **No state library.** React state + custom hooks; the only module-level store pattern permitted is the sibling `subscribe/notify` style if a hook genuinely needs cross-component identity (auth does not — supabase-js already is that store).
 4. **No new user accounts or roles.** Two fixed Supabase Auth users, signups disabled in the dashboard. No profiles table, no per-user row attribution.
@@ -141,6 +143,8 @@ Explicit decisions, not omissions. Revisiting any of them needs a written reason
 6. **No feature loss.** Everything the current site does — map + 5 layers, 44 ideas, three JSON-driven tabs, Full data tab, submit form + `submitted_spots` sync, the auth gate with open-mode fallback, the 14-day itinerary including the discreet 22 Sep evening entry — survives the rebuild. The removals are visual (pink sakura theme) and structural (inline everything, CDN scripts, static itinerary cards).
 
 The feature extension (§13–§19) **does not revisit any of these** — recorded here because this file is where revisiting would have to be argued. Specifically: the PWA adds a service worker that caches the app shell and *read* responses, not a mutation queue or CRDT — offline writes keep the shipped localStorage-plus-quiet-note model, so non-goal 5 stands. The three new tabs switch on the same `activeTab` state — non-goal 2 stands. The three new tables and the photo bucket carry **no per-user attribution** — non-goal 4 stands. And every shipped surface keeps its exact behaviour — non-goal 6 now covers the extension too.
+
+The shared-login extension (§20) **is the one recorded revision**, and it narrows exactly one line: non-goal 1, as rewritten above. Everything else stands. In particular non-goal 4 survives scrutiny: the proxy auto-provisions a Supabase Auth user only for an email that Mishka Hub itself has just verified, and Mishka Hub holds exactly the two household accounts, forever — so the Supabase user set stays bounded at two, public signups stay disabled in the dashboard (the Admin API bypasses that switch by design, which is precisely what makes provisioning work without re-enabling signups), and there is still no profiles table and no per-user row attribution anywhere.
 
 ## 5. Auth model — the Supabase sign-in gate
 
@@ -161,6 +165,8 @@ page load
              │               + realtime subscriptions start (§6, §7)
              └── none ────► status 'signedOut' → <LoginScreen/> full-screen
                             signInWithPassword() on submit
+                            (§20 replaces this ONE call: submit → Japan's login
+                             proxy → setSession(). Everything else here stands.)
              supabase.auth.onAuthStateChange() drives every later transition:
              SIGNED_IN → app; SIGNED_OUT (sign-out button, revoked session,
              expired refresh) → gate returns. Token refresh is invisible.
@@ -247,6 +253,8 @@ Decisions:
 | New deploy while the app is open | `needRefresh` from vite-plugin-pwa | Quiet "New version ready — Refresh" toast; nothing auto-reloads mid-edit (§14d) |
 | Journal photo upload fails | storage error on `upload()` | The entry's text row still saves independently; the photo slot shows a quiet retry control — no queued upload (§19) |
 | Open-Meteo unreachable / beyond horizon | fetch rejects / date out of range | Weather card shows the cached snapshot (<6 h, with "as of" time) or hides entirely — never an error state (§18) |
+| Japan auth API unreachable at a fresh sign-in (Mac asleep, tunnel down) | login fetch fails / returns 503 | LoginScreen shows the friendly §20c line; **already-signed-in sessions are untouched** — persistence and refresh are Supabase's cloud, not the Mac (§20e) |
+| Mishka Hub down but the proxy up | proxy's verify call fails | Same shape: 503 `identity_unavailable`, friendly copy; signed-in sessions unaffected (§20c) |
 
 ## 9. Dark mode strategy
 
@@ -276,6 +284,7 @@ Same mechanism as the siblings, verbatim:
 
 - Storage shapes, seed dataset, mapping functions: [DATA_MODEL.md](DATA_MODEL.md)
 - Supabase tables, RLS, realtime config, exact supabase-js call patterns: [API.md](API.md)
+- Shared-login design — alternatives table, security posture, acceptance criteria: [AUTH.md](AUTH.md)
 - Design system (Aizome application, slot colours, motif, mobile nav, contrast): [DESIGN.md](DESIGN.md)
 - Phases and task ownership ([Opus]/[Sonnet]): [PLAN.md](PLAN.md)
 - Ops runbook (Pages, env variables, Supabase changes, rollback): [DEPLOYMENT.md](DEPLOYMENT.md)
@@ -498,3 +507,108 @@ delete: remove object first, then row; orphaned objects are harmless
 ```
 
 No attribution anywhere — no author column, no per-user path prefixes, nothing in metadata (§4.4). Entries are the couple's, jointly editable, last write wins.
+
+---
+
+# The shared-login extension (§20)
+
+## 20. Shared login — Mishka Hub's credentials, Supabase's session
+
+**Requirement:** Japan signs in with the same email/password as MishkaHub (and therefore Michi), staying in sync automatically forever — change the password in Mishka Hub and it is instantly the password here, with zero Japan-side action and **zero changes to Mishka Hub itself**. The household already solved this once: Michi proxies its login verification to Mishka Hub (`learningLanguageMachine/docs/AUTH.md`). §20 is Japan's adaptation of that shipped design.
+
+The full design — alternatives considered, security posture, acceptance criteria — is [AUTH.md](AUTH.md); the endpoint contract is [API.md](API.md) §9; the delivery plan is [PLAN.md](PLAN.md) Phase 14. This section is the architecture: what runs where, the flow end to end, the failure modes, and why Mac-independence survives.
+
+### 20a. The one-job backend
+
+Michi's proxy issues its **own** JWT/refresh pair after verifying against Mishka Hub, because Michi has its own database and its own session-gated API. Japan has neither: every synced byte (`itinerary_slots`, `submitted_spots`, `visited_marks`, `packing_items`, `journal_entries`, the `journal-photos` bucket) already lives behind **Supabase's own session** — RLS `to authenticated`, realtime, signed Storage URLs, SDK-owned refresh. Porting Michi's session machinery (refresh-token table, rotation, reuse tripwire, `current_user` dependency) would build a second, parallel session system that gates nothing. So Japan's backend does exactly one thing:
+
+> **Verify the password against Mishka Hub (Michi's `identity.py`, ported), then mint a genuine Supabase session for the matching Supabase Auth user and hand it to the frontend.** After that single handoff it is out of the picture entirely.
+
+It is a stateless FastAPI app — no database, no session store, no JWT secret of its own, nothing to migrate or back up:
+
+```
+apps/server/                       # NEW — the identity proxy (PLAN.md Phase 14)
+├── requirements.txt               # fastapi, uvicorn, httpx, supabase, pydantic-settings
+├── .env.example                   # placeholders only — the real .env is gitignored (§20d)
+└── app/
+    ├── main.py                    # FastAPI app + CORS allow-list + router mounts
+    ├── config.py                  # pydantic-settings over .env
+    ├── identity.py                # Mishka Hub verify client — Michi's, near-verbatim
+    ├── sessions.py                # the Supabase session mint (§20b steps 2–5)
+    └── routers/
+        ├── auth.py                # POST /api/auth/login + the rate-limit deque
+        └── health.py              # GET /api/health (Michi's, minus content_version)
+```
+
+### 20b. Login flow end to end
+
+```
+LoginScreen ──(email, password over HTTPS)──► Japan POST /api/auth/login
+    │                                          (japan-api.mishka-hub.com → 127.0.0.1:8102)
+    │   rate limit gate: 5 failures / 15 min / IP, BEFORE any onward call
+    │
+    │   1. verify ── POST {MISHKA_BASE_URL}/api/auth/login (httpx, 5 s) ──► Mishka Hub (8000)
+    │        200 → body.user → verified ✓ (throwaway Mishka session logged out, best-effort)
+    │        401 → Japan returns 401 invalid_credentials
+    │        429 → Japan returns 429, message passed through
+    │        conn error / timeout → 503 identity_unavailable (friendly copy, §20c)
+    │
+    │   2. mint (server-side, service_role — never leaves the Mac):
+    │        look up the Supabase Auth user by lower(email)   (admin list — two users, ever)
+    │        none? admin.create_user({email, email_confirm: true, password: <random>})
+    │        admin.update_user_by_id(id, {password: <fresh 32-byte random>})
+    │        anon-key client signInWithPassword({email, password: <that same random>})
+    │          → a real Supabase session {access_token, refresh_token, expires_in, user}
+    │        any Supabase-side failure → 503 session_mint_failed (§20c)
+    │
+    ◄── {access_token, refresh_token, expires_in, user:{id, email}}
+    │
+    └─ frontend: supabase.auth.setSession({access_token, refresh_token})
+       From this moment it is a completely normal Supabase session — persisted in
+       localStorage and auto-refreshed by supabase-js against Supabase's cloud,
+       exactly as §5 already documents. The proxy is not involved again until the
+       next fresh sign-in.
+```
+
+Notes that keep future readers sane:
+
+- **"What's the Supabase password?" — there isn't a meaningful one.** It is rotated to 32 bytes of noise on every login, never reused, never returned to the frontend, never logged, and irrelevant the moment the session exists. The two Supabase accounts are never meant to be signed into any other way.
+- The rotation does **not** revoke existing Supabase sessions — two phones signing in the same minute each walk away with a working session; the second rotation happens after the first sign-in already completed.
+- The Mishka-side session created by the verification call is discarded; the identity client fires a best-effort logout so Mishka's `refresh_tokens` table stays tidy (Michi's discipline, ported).
+- The service worker never touches the login call: `japan-api.mishka-hub.com` matches no runtime-caching route in §14f, so the request goes straight to the network — and tokens are never cache material anyway (the same reasoning as the §14f NetworkOnly row for `auth/v1`).
+
+### 20c. Failure modes
+
+| Failure | Status | Behaviour |
+|---|---|---|
+| Wrong email/password | 401 `invalid_credentials` | "Incorrect email or password" in the gate's existing calm error line; counts toward the rate limit |
+| Mishka Hub unreachable (its LaunchAgent down, Mac mid-reboot) | 503 `identity_unavailable` | "Mishka Hub isn't reachable — Japan borrows its login. Is it running?" — same shape and tone as Michi's |
+| Supabase Admin/auth API unreachable after a successful verify | 503 `session_mint_failed` | "Signed in with Mishka Hub, but the session couldn't be finished — try again shortly." Nothing half-issued: no tokens returned, rotation is harmless to redo |
+| Rate limit tripped (Japan's own, or Mishka's passed through) | 429 `rate_limited` | "Too many failed login attempts — try again later." |
+| The whole Mac / tunnel offline | fetch fails | LoginScreen shows the 503-style friendly line. **Signed-in phones don't notice** — see §20e |
+
+### 20d. Deployment topology
+
+The proxy joins the two siblings' pattern on the household Mac — same LaunchAgent shape, same shared Cloudflare Tunnel, next free port pair:
+
+| | Mishka Hub | Michi | **Japan** |
+|---|---|---|---|
+| Production API port (LaunchAgent, loopback) | 8000 | 8100 | **8102** |
+| Dev port (launch.json, never the prod process) | — | 8101 | **8103** |
+| Tunnel hostname | mishka-api.mishka-hub.com | michi-api.mishka-hub.com | **japan-api.mishka-hub.com** |
+
+- **LaunchAgent** `~/Library/LaunchAgents/com.japan.api.plist` — `com.michi.api` mirrored: uvicorn from `apps/server/.venv`, `--host 127.0.0.1 --port 8102`, `RunAtLoad` + `KeepAlive`, logs in `~/Library/Logs/japan/`. Restart after code changes with `launchctl kickstart -k gui/$UID/com.japan.api` (no `--reload` in production, same as Michi's gotcha).
+- **Tunnel**: one new ingress line in `~/.cloudflared/config.yml` — `hostname: japan-api.mishka-hub.com` → `service: http://127.0.0.1:8102` — above the `http_status:404` catch-all, plus the DNS CNAME route. cloudflared is a root LaunchDaemon: `sudo launchctl kickstart -k system/com.cloudflare.cloudflared` after editing. The tunnel terminates TLS and proxies to loopback-only uvicorn, so `X-Forwarded-For` is trustworthy for the rate limit (same argument as Michi's).
+- **Secrets**: the real `apps/server/.env` (gitignored) holds `MISHKA_BASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and the **`SUPABASE_SERVICE_ROLE_KEY`** — the most sensitive credential in this design; handling rules in [AUTH.md](AUTH.md) §4. The committed `.env.example` carries placeholders only.
+- **CORS** allow-list: `https://fyreline.github.io`, `http://localhost:5175`, `http://127.0.0.1:5175`. Bearer-less: the login response body carries the session pair once; no cookies.
+- **Frontend wiring**: the SPA reads `VITE_AUTH_API_BASE`, defaulting to `https://japan-api.mishka-hub.com` when unset — so the Pages build needs no new repo variable, and local dev against a local proxy overrides it in `.env.local` (`http://127.0.0.1:8103`). Open mode is untouched: with no Supabase env vars there is no gate and the proxy is never called.
+- Installing the LaunchAgent, editing the tunnel config and placing the real key are **owner/orchestrator steps on the real machine** — [PLAN.md](PLAN.md) Phase 14 marks them explicitly as not the implementing agent's job.
+
+### 20e. Mac-independence after login — the load-bearing fact
+
+**The household Mac and its tunnel matter at exactly one moment: a fresh sign-in. At every other moment they are irrelevant to Japan.** This is the single most important property of the design; spell-out, so it is never lost:
+
+- The session the proxy hands over is a **genuine Supabase session** — indistinguishable from one minted by `signInWithPassword` in the browser. supabase-js persists it in localStorage and refreshes it against **Supabase's cloud refresh endpoint** (`*.supabase.co/auth/v1`), which has nothing to do with the Mac.
+- Once signed in, everything already documented keeps working with the Mac powered off: table reads/writes, realtime channels, journal photo uploads and signed URLs, token refresh past any number of access-token expiries, and fully-offline PWA relaunches from the service-worker shell (§14).
+- A signed-in phone re-encounters the proxy only if its Supabase session is genuinely gone: explicit sign-out, session revoked in the dashboard, or the refresh token expiring after weeks of complete disuse. Then — and only then — the next sign-in needs the Mac reachable.
+- Sign-out (`signOut`), session subscription (`onAuthStateChange`) and refresh are **unchanged in code and behaviour** — the extension replaces one call at the gate ([API.md](API.md) §1) and adds nothing else to the frontend's auth surface.

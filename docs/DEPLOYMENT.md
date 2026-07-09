@@ -2,7 +2,7 @@
 
 The runbook for putting the rebuilt site in production and keeping it there: local dev, GitHub Pages via Actions, the Supabase env-variable wiring, schema-change procedure, and rollback. Written to be executed top-to-bottom on a fresh setup and consulted piecemeal later. Topology rationale: [ARCHITECTURE.md](ARCHITECTURE.md) §11. The friendly, non-technical Supabase walkthrough stays in [SUPABASE_SETUP.md](../SUPABASE_SETUP.md) — this doc cross-references it rather than duplicating it.
 
-**Status: planned.** Today the repo deploys from branch (`main`/root serves the old `index.html`); the cutover to Actions happens in [PLAN.md](PLAN.md) Phase 5. There is nothing else to operate — **no server, no tunnel, no LaunchAgent** ends this doc several sections earlier than its siblings'.
+**Status: planned.** Today the repo deploys from branch (`main`/root serves the old `index.html`); the cutover to Actions happens in [PLAN.md](PLAN.md) Phase 5. There is almost nothing else to operate: the one exception is the shared-login proxy (**LaunchAgent `com.japan.api` on 8102 + the `japan-api.mishka-hub.com` tunnel ingress**, [PLAN.md](PLAN.md) Phase 14) — its topology and runbook facts live in [ARCHITECTURE.md](ARCHITECTURE.md) §20d, and it only matters at the fresh sign-in moment; everything below this line is unchanged by it.
 
 ---
 

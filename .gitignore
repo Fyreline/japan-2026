@@ -14,6 +14,15 @@ apps/web/dist/
 apps/web/.env.local
 .env*.local
 
+# Python (apps/server — the login proxy, docs/AUTH.md). The real .env holds
+# the service_role key, the most sensitive credential in this project — it
+# must never be committed (docs/AUTH.md §4).
+apps/server/.venv/
+apps/server/.env
+apps/server/__pycache__/
+**/__pycache__/
+*.pyc
+
 # Editor / tooling
 .claude/
 

@@ -1,8 +1,8 @@
 # Japan 2026 — Supabase Surface
 
-There is no REST API of ours — the SPA talks to Supabase directly through `@supabase/supabase-js` v2. This doc is the complete contract for that surface: client init, the Auth calls, every table's SQL (schema + RLS + realtime), the journal photo bucket + its storage policies, the exact TypeScript call patterns the hooks implement — plus the one non-Supabase call in the app, the keyless Open-Meteo fetch (§8). Implement the data hooks against this doc and update it in the same commit as any change. Storage rationale: [DATA_MODEL.md](DATA_MODEL.md); flow diagrams: [ARCHITECTURE.md](ARCHITECTURE.md) §5–7, §13–19.
+There is exactly one REST endpoint of ours — the §9 login proxy, used at the sign-in moment and never again — and everything else is the SPA talking to Supabase directly through `@supabase/supabase-js` v2. This doc is the complete contract for that surface: client init, the Auth calls, every table's SQL (schema + RLS + realtime), the journal photo bucket + its storage policies, the exact TypeScript call patterns the hooks implement — plus the one non-Supabase call in the app, the keyless Open-Meteo fetch (§8), and the login proxy's contract (§9). Implement the data hooks against this doc and update it in the same commit as any change. Storage rationale: [DATA_MODEL.md](DATA_MODEL.md); flow diagrams: [ARCHITECTURE.md](ARCHITECTURE.md) §5–7, §13–19, §20.
 
-**Status:** §1–§3 are live (tables `submitted_spots` + `itinerary_slots`, shipped). §5–§8 are the **feature extension** — three new tables, the first Storage bucket, and the weather call ([PLAN.md](PLAN.md) Phases 7–13). Each new table's SQL is applied once via the dashboard SQL editor and committed under `supabase/migrations/` (DEPLOYMENT.md §3a).
+**Status:** §1–§3 are live (tables `submitted_spots` + `itinerary_slots`, shipped). §5–§8 are the **feature extension** — three new tables, the first Storage bucket, and the weather call ([PLAN.md](PLAN.md) Phases 7–13). Each new table's SQL is applied once via the dashboard SQL editor and committed under `supabase/migrations/` (DEPLOYMENT.md §3a). §9 (and the §1 sign-in change it implies) is the **shared-login extension** ([PLAN.md](PLAN.md) Phase 14, design in [AUTH.md](AUTH.md)).
 
 ---
 
@@ -23,7 +23,7 @@ export const supabase: SupabaseClient | null =
 ```
 
 - Defaults are correct and must not be overridden: `persistSession: true` (localStorage), `autoRefreshToken: true`, `detectSessionInUrl: true`. **No manual token machinery** — supabase-js owns refresh/persistence (this is the deliberate difference from MishkaHub's hand-rolled `auth.ts`; see ARCHITECTURE.md §5).
-- The anon key is a public, RLS-guarded `sb_publishable_` key. It ships in the built bundle by design. The `service_role` key must never appear anywhere in this repo, its env files, or its Actions variables.
+- The anon key is a public, RLS-guarded `sb_publishable_` key. It ships in the built bundle by design. The `service_role` key must never appear in `apps/web`, any `VITE_*` env var (those are baked into the public bundle), git history, or Actions variables — the one place it lives outside the dashboard is the login proxy's gitignored `apps/server/.env` on the household Mac (§9, [AUTH.md](AUTH.md) §4).
 - Error convention: every `{ data, error }` return is checked; mutations surface failures as the quiet inline notes specced in [DESIGN.md](DESIGN.md) §6.6 and **never lose the optimistic local write** (localStorage keeps it).
 
 ### 0b. Table & bucket names
@@ -50,26 +50,45 @@ The old `config.js` `SUPABASE_TABLE` indirection retires.
 
 Two fixed users, created manually in the dashboard (auto-confirmed), public signups disabled — there is no registration surface anywhere. Setup walkthrough: [SUPABASE_SETUP.md](../SUPABASE_SETUP.md).
 
+**Changed by the shared-login extension (§9, [AUTH.md](AUTH.md)):** the frontend no longer calls `signInWithPassword` — the LoginScreen submit now POSTs to Japan's own login proxy (which verifies the credentials against Mishka Hub and mints a genuine Supabase session), then adopts that session with `setSession()`. **That is the entire change.** `getSession`, `onAuthStateChange`, `signOut`, session persistence and token auto-refresh are exactly as shipped — supabase-js still owns all of it, none of it needs touching, and nothing else in this doc's Supabase surface moves.
+
 ### 1a. Calls (`useAuth.ts`)
 
 ```ts
 // initial session (page load) — resolves from localStorage, no network round-trip needed
+// UNCHANGED by §9
 const { data: { session } } = await supabase.auth.getSession()
 
 // every later transition (sign-in, sign-out, token refresh, revocation)
+// UNCHANGED by §9
 const { data: { subscription } } = supabase.auth.onAuthStateChange(
   (_event, session) => setSession(session),
 )
 // cleanup on unmount: subscription.unsubscribe()
 
-// sign in (LoginScreen submit)
-const { error } = await supabase.auth.signInWithPassword({
-  email: email.trim(),
-  password,
-})
-// error.message → shown verbatim in the form's text-fig error line
+// sign in (LoginScreen submit) — REPLACED by §9: credentials go to Japan's
+// login proxy, which verifies them against Mishka Hub and returns a genuine
+// Supabase session pair; the SPA adopts it. AUTH_API_BASE defaults to the
+// production tunnel hostname; .env.local overrides it for local dev (§9).
+const AUTH_API_BASE =
+  import.meta.env.VITE_AUTH_API_BASE ?? 'https://japan-api.mishka-hub.com'
 
-// sign out (header button) — onAuthStateChange re-raises the gate
+const res = await fetch(`${AUTH_API_BASE}/api/auth/login`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email: email.trim(), password }),
+})
+if (!res.ok) {
+  const body = await res.json().catch(() => null)
+  // body?.detail → shown verbatim in the form's text-fig error line
+  // (fetch/network failure → the §9a 503 copy, hardcoded as the fallback line)
+}
+const { access_token, refresh_token } = await res.json()
+const { error } = await supabase.auth.setSession({ access_token, refresh_token })
+// from here it is a completely normal Supabase session — persisted and
+// auto-refreshed by supabase-js with zero further involvement from the proxy
+
+// sign out (header button) — UNCHANGED by §9: onAuthStateChange re-raises the gate
 await supabase.auth.signOut()
 ```
 
@@ -312,7 +331,7 @@ const { error } = await supabase
 | Who can read/write any table? | Only the two `authenticated` users. RLS on every table; no `anon` policies exist. |
 | Is the anon key in a public repo/bundle a problem? | No — it is designed to be public (`sb_publishable_`), and grants nothing without a session. Documented in SUPABASE_SETUP.md. |
 | Registration? | Disabled in the dashboard (Auth → Providers → Email → "Allow new users to sign up" OFF). Two accounts, ever. |
-| service_role key | Never in this repo, never in Actions. Dashboard-only. |
+| service_role key | Never in git history, never in Actions, never in `apps/web` or the built bundle. Its one home outside the dashboard is the login proxy's gitignored `apps/server/.env` on the household Mac — server-side only, never logged, placeholders only in every committed file (§9, [AUTH.md](AUTH.md) §4). |
 | Realtime | Every synced table is in the `supabase_realtime` publication; RLS applies to realtime too (Supabase enforces policies on `postgres_changes` for the subscribing user's JWT). |
 | The 22 Sep secret | Not a database concern: the seed text is generic by rule (DATA_MODEL.md §6b). Anything more specific only ever exists as live row content typed by a traveller, behind the gate. |
 | The extension tables (§5–§7) | Same posture exactly: `authenticated`-only policies, zero `anon` grants. `visited_marks` deliberately has no UPDATE policy (presence-only); `packing_items` and `journal_entries` carry the full CRUD set like `itinerary_slots`. |
@@ -646,3 +665,87 @@ Rules:
 - `timezone=Asia/Tokyo` pins daily boundaries to JST regardless of where the request is made from (pre-trip checks from the UK show Japan's days, not Britain's).
 - `forecast_days: '7'` covers "current + a short forecast"; the API's free horizon is 16 days, so mid-trip every remaining leg is in range. Pre-trip, September dates are beyond the horizon — the card falls back to current conditions only (DESIGN.md §16).
 - Every failure path ends in "show the cached snapshot or show nothing" — never an error state, never a toast (weather is ambience, not infrastructure).
+
+## 9. The login proxy (shared-login extension) — the one API of ours
+
+Design + alternatives + security posture: [AUTH.md](AUTH.md). Architecture, topology and the Mac-independence argument: [ARCHITECTURE.md](ARCHITECTURE.md) §20. Delivery: [PLAN.md](PLAN.md) Phase 14.
+
+A stateless FastAPI app (`apps/server`) with exactly two routes and no database. Base URL: **`https://japan-api.mishka-hub.com`** in production (Cloudflare Tunnel → loopback uvicorn on the household Mac, port **8102**); **`http://127.0.0.1:8103`** when running the dev instance locally. The SPA reads the base from `VITE_AUTH_API_BASE` and defaults to the production hostname when unset (§1a) — so the Pages build needs no new repo variable.
+
+Error bodies follow the household shape everywhere: `{"detail": "<human sentence>", "code": "<machine_slug>"}`.
+
+### 9a. `POST /api/auth/login`
+
+Request:
+
+```json
+{ "email": "string", "password": "string" }
+```
+
+Responses:
+
+```
+200 → { "access_token":  "<supabase access JWT>",
+        "refresh_token": "<supabase refresh token>",
+        "expires_in":    3600,
+        "user": { "id": "<supabase user uuid>", "email": "string" } }
+      — a genuine Supabase session pair, produced by a real signInWithPassword
+        on the server (see below); the SPA feeds it straight to setSession()
+
+401 → { "detail": "Incorrect email or password", "code": "invalid_credentials" }
+429 → { "detail": "Too many failed login attempts — try again later.", "code": "rate_limited" }
+      — Japan's own 5-failures/15-min/IP limit, or Mishka Hub's own 429 passed through
+503 → { "detail": "Mishka Hub isn't reachable — Japan borrows its login. Is it running?",
+        "code": "identity_unavailable" }
+503 → { "detail": "Signed in with Mishka Hub, but the session couldn't be finished — try again shortly.",
+        "code": "session_mint_failed" }
+      — verification succeeded but Supabase's Auth API was unreachable; nothing was
+        half-issued (no tokens returned; the password rotation is harmless to redo)
+```
+
+Server-side sequence (the complete contract — [AUTH.md](AUTH.md) §2 has the diagram):
+
+1. Rate-limit gate (5/15 min/IP, in front of everything — a brute force must not reach Mishka Hub or the mint).
+2. Verify `lower(email)` + password against Mishka Hub's unmodified `POST /api/auth/login` via the ported identity client; map 401/429/unreachable per the table above. The throwaway Mishka session is logged out best-effort.
+3. Mint the Supabase session — service_role key, server-side only:
+
+```python
+# supabase-py v2; both clients are module-level singletons in app/sessions.py
+admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)   # never logged, never returned
+anon  = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)           # same public key the SPA bakes in
+
+# 3a. find the Supabase Auth user by email. There is no stable get-by-email
+#     admin call; the project holds two users, ever — list and match:
+users = admin.auth.admin.list_users()
+user = next((u for u in users if (u.email or "").lower() == email), None)
+
+# 3b. auto-provision on first login (bounded by Mishka Hub's own account list —
+#     an email only reaches this line if Mishka Hub just verified it):
+if user is None:
+    user = admin.auth.admin.create_user(
+        {"email": email, "email_confirm": True, "password": fresh_random()}
+    ).user
+
+# 3c. rotate the password to noise — 32 bytes, base64; never reused, never
+#     returned, never logged. Normal, stable Admin API surface:
+password = fresh_random()   # secrets.token_urlsafe(32)
+admin.auth.admin.update_user_by_id(user.id, {"password": password})
+
+# 3d. a real sign-in with the anon client → a genuine Supabase session:
+session = anon.auth.sign_in_with_password(
+    {"email": email, "password": password}
+).session
+# → session.access_token / .refresh_token / .expires_in / .user
+```
+
+4. Return the pair. Any exception in 3a–3d → 503 `session_mint_failed`; the password variable goes out of scope and is never persisted.
+
+### 9b. `GET /api/health`
+
+Mirror of Michi's probe, minus its content versioning:
+
+```
+200 → { "status": "ok", "identity": "reachable" | "unreachable" }
+```
+
+`identity` is the Mishka Hub reachability probe (identity client's `ping()`, 1 s timeout), cached for 60 s at module scope so health checks never hammer or block on Mishka Hub. Used by the orchestrator/tunnel checks; the SPA never calls it.

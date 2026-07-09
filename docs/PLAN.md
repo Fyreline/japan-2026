@@ -21,8 +21,9 @@ What we're building (one line): the current single-file pink static site becomes
 | 11 | Journal + Storage: `journal_entries` table, `journal-photos` bucket + policies, image compression, journal tab | Opus | DATA_MODEL §12 · API §7 · ARCHITECTURE §19 · DESIGN §18 |
 | 12 | Reference tab + extension paperwork: quick-reference content, migrations 0002–0004 committed, README/SUPABASE_SETUP additions | Sonnet | DATA_MODEL §15 · DESIGN §17 · DEPLOYMENT §3 |
 | 13 | Extension verification: install drills, offline drills, three-table realtime, storage RLS probe, full regression sweep | Opus | all extension acceptance sections |
+| 14 | Shared login with Mishka Hub: `apps/server` identity proxy + Supabase session mint, frontend sign-in rewire | Opus | AUTH · ARCHITECTURE §20 · API §9 |
 
-Sequencing: strictly linear within each block — 1 → … → 6 (done), then 7 → … → 13 — each phase builds on the previous one's verified state, and this repo has no parallel tracks worth the coordination cost. Phases land as commits on `main` (two-person repo, no PR ceremony), message prefix `phase-N:`.
+Sequencing: strictly linear within each block — 1 → … → 6 (done), then 7 → … → 13, then 14 (the shared-login extension touches no §13–19 surface, but stays sequenced after them so the regression bar remains single-threaded). Each phase builds on the previous one's verified state, and this repo has no parallel tracks worth the coordination cost. Phases land as commits on `main` (two-person repo, no PR ceremony), message prefix `phase-N:`.
 
 ---
 
@@ -163,6 +164,25 @@ Mechanical and fully specced — content is transcription, not judgement. **Do n
 - [ ] [Opus] Regression sweep of every shipped behaviour (the Phase 6 list, re-run): all views reachable on desktop and mobile incl. the two segmented groups, map layers + fly-to, submit vocab, itinerary drag/edit/sync, day-3 discretion, dark mode, reduced motion, no console errors, Lighthouse a11y ≥ 95 now including Packing/Journal/Reference, zero hex literals outside `theme.css` + the DESIGN §12a exception files.
 
 **Acceptance:** every box above ticked with logged evidence, or recorded here as a deliberate follow-up; the household can land at Haneda with no signal and still see the plan, tick off the first konbini run, and write the first journal entry.
+
+---
+
+# Shared-login extension (Phase 14)
+
+## Phase 14 — Shared login with Mishka Hub [Opus]
+
+Spec: [AUTH.md](AUTH.md) (design, security posture, acceptance) · [ARCHITECTURE.md](ARCHITECTURE.md) §20 (flow, failure modes, topology) · [API.md](API.md) §1 + §9 (the endpoint contract and the one frontend call that changes). Prereq facts, all real and verified — use them, don't invent others: Mishka Hub's API runs on `127.0.0.1:8000` (LaunchAgent `com.mishka.api`), Michi's on `8100` (prod) / `8101` (dev); the shared tunnel config is `~/.cloudflared/config.yml`; Michi's `apps/server/app/identity.py` is the client to port. **Japan's backend takes port 8102 (production) and 8103 (dev-only)** — the same prod/dev split as Michi's 8100/8101, so local runs never collide with the always-on instance.
+
+- [ ] [Opus] `apps/server` scaffold: `requirements.txt` (fastapi, uvicorn, httpx, supabase, pydantic-settings), `app/main.py` (CORS allow-list per AUTH §3.3), `app/config.py` (pydantic-settings over `.env`). Stateless by design — **no database, no models, no security.py, no JWT secret**; AUTH §2's "deliberately absent" list is a build constraint, not a suggestion.
+- [ ] [Opus] `apps/server/.env.example` committed with **placeholders only**: `MISHKA_BASE_URL=http://127.0.0.1:8000`, `SUPABASE_URL=https://<project-ref>.supabase.co`, `SUPABASE_ANON_KEY=sb_publishable_<same public key the web app uses>`, `SUPABASE_SERVICE_ROLE_KEY=<service-role-key-here>`, each with a comment on where the real value comes from. Add `apps/server/.env` (and the venv) to `.gitignore` — **the existing `OfflineExample.html` and `Japan Itinerary/` exclusions stay byte-identical.** The real service_role key is NEVER committed, echoed, or logged — AUTH §4 is the law here.
+- [ ] [Opus] `app/identity.py` — Michi's, ported near-verbatim: typed exceptions, loopback/HTTPS guard, never-log-the-password redaction, best-effort logout of the throwaway Mishka session, `ping()`.
+- [ ] [Opus] `app/sessions.py` + `app/routers/auth.py` + `app/routers/health.py` per API §9: rate-limit deque in front of the identity call, the mint sequence exactly as written (admin list → create-if-missing → rotate → anon sign-in), the four error shapes, the 60 s-cached health probe. Pytest with a stubbed identity client and stubbed Supabase clients: happy path, 401, 429 (including "sixth attempt never reaches Mishka"), both 503s — same green-suite bar as Michi.
+- [ ] [Opus] Frontend rewire: `useAuth.ts` `signIn()` → POST to `VITE_AUTH_API_BASE` (default `https://japan-api.mishka-hub.com`) then `supabase.auth.setSession()`, per API §1a — error `detail` rendered in `LoginScreen.tsx`'s existing error line (visuals untouched); `apps/web/.env.example` gains a commented optional `VITE_AUTH_API_BASE` line for local-proxy dev. **`getSession`/`onAuthStateChange`/`signOut` and every data hook stay untouched** — API §1 says so explicitly; a diff touching them is a misread.
+- [ ] [Opus] Household `launch.json` (shared `~/…/Dev/.claude/launch.json`, not a repo file): add a `japan-api` dev entry on **8103**, mirroring the `michi-api` (8101) pattern. Leave every other entry untouched.
+
+**NOT this phase's agent's job — local deployment (orchestrator + owner, on the real machine, afterwards):** writing the real `apps/server/.env` (the owner supplies the service_role key from the Supabase dashboard — the one human-in-the-loop secret); creating the venv and installing requirements on the Mac; the LaunchAgent `~/Library/LaunchAgents/com.japan.api.plist` (mirror `com.michi.api`: uvicorn from the venv, `--host 127.0.0.1 --port 8102`, RunAtLoad + KeepAlive, logs in `~/Library/Logs/japan/`); the tunnel ingress line (`japan-api.mishka-hub.com` → `http://127.0.0.1:8102` in `~/.cloudflared/config.yml`, above the 404 catch-all) + the DNS CNAME route + `sudo launchctl kickstart -k system/com.cloudflare.cloudflared`; then starting and verifying the service end to end. The implementing agent writes code, tests and docs, and stops at the machine's edge.
+
+**Acceptance (run the code, not the report — subagent claims are not evidence):** pytest green in `apps/server`; `typecheck && build` green in `apps/web`. Live drill with the dev proxy (`uvicorn app.main:app --port 8103` + real `.env`) and `npm run dev`: sign in with current household credentials → a working Supabase session (itinerary loads, a realtime frame arrives); wrong password → the calm 401 line; stop Mishka Hub's LaunchAgent → login shows the friendly 503 **and** an already-signed-in tab keeps working — then stop the Japan proxy too and confirm the signed-in tab still reads, writes and refreshes (the AUTH §5 "big one"). Password-change drill per AUTH §5 (`set_password.py`, zero Japan-side action). Grep proofs: no service_role string in git or `apps/web/dist`; `grep -ri "jwt_secret\|argon2\|refresh_tokens" apps/server` empty. Open mode still works with zero setup; the 22 Sep slot untouched; no new hex literals; both load-bearing `.gitignore` exclusions intact.
 
 ---
 
