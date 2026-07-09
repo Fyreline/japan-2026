@@ -69,6 +69,27 @@ export function formatIsoDateKicker(iso: string): string {
   return `${WEEKDAYS[date.getDay()]} ${d} ${MONTHS[m - 1]}`
 }
 
+/** Minutes-since-midnight for a slot time label, or null if unparseable.
+ * Same pattern as currentSlotFor's inline parse (/^(\d{1,2}):(\d{2})/) —
+ * pulled out so reorderSlot's time-recompute (DATA_MODEL.md §6c) can share
+ * it without duplicating the regex. */
+export function parseTimeToMinutes(time: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})/.exec(time)
+  if (!m) return null
+  return Number(m[1]) * 60 + Number(m[2])
+}
+
+/** Inverse of parseTimeToMinutes — clamps to the 00:00–23:55 range and
+ * rounds to the nearest 5 minutes (a raw midpoint like 10:37 reads as
+ * noise on a calm itinerary; 10:35 doesn't). */
+export function formatMinutesToTime(minutes: number): string {
+  const rounded = Math.round(minutes / 5) * 5
+  const clamped = Math.max(0, Math.min(23 * 60 + 55, rounded))
+  const h = Math.floor(clamped / 60)
+  const m = clamped % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
 export interface CurrentSlotResult {
   slotKey: string | null
   status: 'now' | 'next' | null

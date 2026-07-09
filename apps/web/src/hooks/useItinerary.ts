@@ -4,6 +4,7 @@ import { supabase, TABLES } from '../lib/supabase'
 import type { AuthState } from '../auth/useAuth'
 import { ITINERARY_SEED } from '../data/itinerarySeed'
 import { SLOT_TYPES, type ItinerarySlot, type SlotType } from '../data/types'
+import { formatMinutesToTime, parseTimeToMinutes } from '../data/tripWindow'
 
 const LOCAL_KEY = 'japan2026ItinerarySlots'
 const RENUMBER_EPSILON = 1e-6
@@ -289,6 +290,24 @@ export function useItinerary(auth: AuthState): UseItinerary {
       const prev = without[insertAt - 1]
       const next = without[insertAt]
 
+      // Time follows the drop, same as position (DATA_MODEL.md §6c): the
+      // moved slot's clock time is recomputed from its NEW neighbours so a
+      // reordered day still reads top-to-bottom in time order. Only the
+      // moved slot's time changes — everything else keeps its own label.
+      // Neighbours with an unparseable time (rare free-text label) are
+      // treated as absent; if neither neighbour parses, the time is left
+      // exactly as it was rather than guessed at.
+      const prevMinutes = prev ? parseTimeToMinutes(prev.time) : null
+      const nextMinutes = next ? parseTimeToMinutes(next.time) : null
+      let newTime = moving.time
+      if (prevMinutes != null && nextMinutes != null) {
+        newTime = formatMinutesToTime((prevMinutes + nextMinutes) / 2)
+      } else if (prevMinutes != null) {
+        newTime = formatMinutesToTime(prevMinutes + 30)
+      } else if (nextMinutes != null) {
+        newTime = formatMinutesToTime(nextMinutes - 30)
+      }
+
       let newPosition: number
       if (!prev && !next) newPosition = 10
       else if (!prev) newPosition = next.position - 10
@@ -301,9 +320,12 @@ export function useItinerary(auth: AuthState): UseItinerary {
 
       if (tooClose) {
         // Renumber guard (DATA_MODEL.md §6c, API.md §3e) — rewrite the whole
-        // day back onto the 10-lattice in one batched pass.
+        // day back onto the 10-lattice in one batched pass. Only the moved
+        // slot's time changes here too; the rest keep their positions
+        // renumbered but their own times untouched.
         const ordered = [...without]
-        ordered.splice(insertAt, 0, moving)
+        const movedWithTime: ItinerarySlot = { ...moving, time: newTime }
+        ordered.splice(insertAt, 0, movedWithTime)
         const renumbered = ordered.map((s, i) => ({ ...s, position: (i + 1) * 10 }))
         const map = new Map(slotsRef.current)
         for (const s of renumbered) map.set(s.slotKey, s)
@@ -317,13 +339,16 @@ export function useItinerary(auth: AuthState): UseItinerary {
         return
       }
 
-      const updated: ItinerarySlot = { ...moving, position: newPosition }
+      const updated: ItinerarySlot = { ...moving, position: newPosition, time: newTime }
       const map = new Map(slotsRef.current)
       map.set(slotKey, updated)
       setSlots(map)
       persist(map, async () => {
         if (!supabase) return
-        return supabase.from(TABLES.slots).update({ position: newPosition }).eq('slot_key', slotKey)
+        return supabase
+          .from(TABLES.slots)
+          .update({ position: newPosition, time_label: newTime })
+          .eq('slot_key', slotKey)
       })
     },
     [persist],

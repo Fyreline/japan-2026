@@ -184,6 +184,7 @@ export interface ItinerarySlot {
 - Render order: `ORDER BY day, position`, ties broken by `slotKey` for determinism.
 - Drag-drop: the moved slot's new `position = (prev.position + next.position) / 2` — or `first − 10` / `last + 10` at the edges → **one row updated per drag**, one realtime frame.
 - Renumber guard: if the midpoint would land within `1e-6` of a neighbour (≈50 consecutive drags into the same gap), the client rewrites that day's positions back onto the 10-lattice in a single batched pass. Rare enough to be a footnote, cheap enough to be safe.
+- **Time follows the drop.** A reorder also recomputes the moved slot's `time` label from its new neighbours (`tripWindow.ts`'s `parseTimeToMinutes`/`formatMinutesToTime`, the same HH:MM parse `currentSlotFor` already uses), so a reordered day still reads top-to-bottom in time order instead of carrying its old clock time to a new spot: midpoint of both neighbours' minutes when both parse, ±30 min off a single parseable neighbour at either edge of the day, rounded to the nearest 5 minutes and clamped to 00:00–23:55. Only the *moved* slot's time changes — its neighbours keep their own labels. If neither neighbour has a parseable time, the moved slot's time is left exactly as it was rather than guessed at. Applies in both the plain-reorder and renumber-guard paths.
 
 ### 6d. Slot — Supabase table `itinerary_slots`
 
