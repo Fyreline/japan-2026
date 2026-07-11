@@ -133,7 +133,7 @@ export const ITINERARY_SEED: ItinerarySlot[] = [
   { slotKey: 'd12-1200-lunch', day: 12, position: 30, time: '12:00', type: 'food', text: '🍜 Lunch' },
   { slotKey: 'd12-1330-nishiki-market', day: 12, position: 40, time: '13:30', type: 'culture', text: '🥢 Nishiki Market' },
   { slotKey: 'd12-1530-free-time', day: 12, position: 50, time: '15:30', type: 'free', text: '🌳 Free time — temples & gardens' },
-  { slotKey: 'd12-1800-dinner', day: 12, position: 60, time: '18:00', type: 'food', text: '🍲 Dinner — splurge night!' },
+  { slotKey: 'd12-1800-dinner', day: 12, position: 60, time: '18:00', type: 'food', text: '🍲 Dinner — splurge night' },
   { slotKey: 'd12-2000-evening-wander', day: 12, position: 70, time: '20:00', type: 'free', text: '🚶 Evening wander' },
 
   // ── Day 13 · Fri 2 Oct · Tokyo — return, staying near Haneda ─────────────
@@ -148,6 +148,6 @@ export const ITINERARY_SEED: ItinerarySlot[] = [
   // ── Day 14 · Sat 3 Oct · Home — fly home ──────────────────────────────────
   { slotKey: 'd14-0530-checkout-transfer', day: 14, position: 10, time: '05:30', type: 'travel', text: '🧳 Check out, airport transfer' },
   { slotKey: 'd14-0700-haneda-checkin', day: 14, position: 20, time: '07:00', type: 'travel', text: '🛫 Haneda check-in & security' },
-  { slotKey: 'd14-0855-flight-home', day: 14, position: 30, time: '08:55', type: 'travel', text: '✈️ Flight home — safe travels!' },
+  { slotKey: 'd14-0855-flight-home', day: 14, position: 30, time: '08:55', type: 'travel', text: '✈️ Flight home — safe travels' },
   { slotKey: 'd14-1545-heathrow-landing', day: 14, position: 40, time: '15:45', type: 'travel', text: '🏠 Land at Heathrow — welcome home' },
 ]

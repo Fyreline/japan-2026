@@ -228,7 +228,7 @@ export function SubmitForm({
             <button
               type="submit"
               disabled={busy}
-              className="rounded-md bg-clay px-4 py-2.5 text-sm font-medium text-paper transition hover:bg-clay-deep disabled:opacity-50"
+              className="min-h-11 rounded-md bg-clay px-4 py-2.5 text-sm font-medium text-paper transition hover:bg-clay-deep disabled:opacity-50"
             >
               {busy ? 'Submitting…' : 'Add spot'}
             </button>
